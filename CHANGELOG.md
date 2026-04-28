@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.3.1] - 2026-04-28
+
+### Fixed
+- Page lag after opening the emote picker. Root causes: (1) each emote button had its own `click` and `mousedown` closure — with 500+ emotes across three providers this created thousands of GC-tracked listener objects. Replaced with event delegation (two listeners per provider grid). (2) All buttons were created synchronously on the main thread. Now uses `requestIdleCallback` to build buttons in chunks of 60 across idle frames, keeping the page responsive.
+
 ## [2.3.0] - 2026-04-28
 
 ### Changed

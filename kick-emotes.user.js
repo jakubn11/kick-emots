@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.3.0
+// @version      2.3.1
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -736,6 +736,40 @@
 
   // ─── Emote Picker ─────────────────────────────────────────────────────────
 
+  const RIC = typeof requestIdleCallback === 'function'
+    ? (cb) => requestIdleCallback(cb, { timeout: 300 })
+    : (cb) => setTimeout(cb, 16);
+
+  const PICKER_CHUNK = 60; // buttons built per idle slice
+
+  function pickerFillChunked(grid, emotes) {
+    let i = 0;
+    function step() {
+      const frag = document.createDocumentFragment();
+      const end = Math.min(i + PICKER_CHUNK, emotes.length);
+      for (; i < end; i++) {
+        const { code, emote } = emotes[i];
+        const btn = document.createElement('button');
+        btn.type      = 'button';
+        btn.className = 'kte-picker-btn';
+        btn.title     = `${code} · ${emote.source}`;
+        btn.setAttribute('aria-label', `Insert ${code}`);
+        btn.dataset.code = code;
+        const img = document.createElement('img');
+        img.src       = emote.url;
+        img.alt       = code;
+        img.draggable = false;
+        img.loading   = 'lazy';
+        img.decoding  = 'async';
+        btn.appendChild(img);
+        frag.appendChild(btn);
+      }
+      grid.appendChild(frag);
+      if (i < emotes.length) RIC(step);
+    }
+    RIC(step);
+  }
+
   function pickerInsert(code) {
     const el = acFindInput();
     if (!el) return;
@@ -801,27 +835,10 @@
 
       const grid = document.createElement('div');
       grid.className = 'kte-picker-grid';
-      const frag = document.createDocumentFragment();
-      for (const { code, emote } of emotes) {
-        const btn = document.createElement('button');
-        btn.type  = 'button';
-        btn.className = 'kte-picker-btn';
-        btn.title = `${code} · ${emote.source}`;
-        btn.setAttribute('aria-label', `Insert ${code}`);
-
-        const img = document.createElement('img');
-        img.src       = emote.url;
-        img.alt       = code;
-        img.draggable = false;
-        img.loading   = 'lazy';
-        img.decoding  = 'async';
-
-        btn.appendChild(img);
-        btn.addEventListener('mousedown', e => e.preventDefault());
-        btn.addEventListener('click', () => pickerInsert(code));
-        frag.appendChild(btn);
-      }
-      grid.appendChild(frag);
+      // Event delegation — one listener pair per grid instead of per button.
+      grid.addEventListener('mousedown', e => { if (e.target.closest('.kte-picker-btn')) e.preventDefault(); });
+      grid.addEventListener('click',     e => { const b = e.target.closest('.kte-picker-btn'); if (b?.dataset.code) pickerInsert(b.dataset.code); });
+      pickerFillChunked(grid, emotes);
       section.appendChild(grid);
       wrap.appendChild(section);
     }
