@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.4.3
+// @version      2.4.4
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -199,15 +199,22 @@
     }
 
     /* Native emote picker tab */
+    #kte-picker-tab {
+      position: relative;
+    }
     .kte-picker-tab-label {
-      flex: 1;
       display: flex;
       align-items: center;
       justify-content: center;
+      width: 100%;
+      height: 100%;
     }
     .kte-picker-underline {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
       height: 2px;
-      width: 100%;
       background: transparent;
       transition: background-color 300ms;
     }
