@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.4.5
+// @version      2.4.6
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -198,24 +198,7 @@
       border-top: 1px solid #27272a;
     }
 
-    /* Native emote picker tab */
-    #kte-picker-tab {
-      box-shadow: inset 0 -2px 0 transparent;
-      transition: box-shadow 300ms;
-    }
-    #kte-picker-tab:hover {
-      box-shadow: inset 0 -2px 0 #475054;
-    }
-    #kte-picker-tab[data-active="true"] {
-      box-shadow: inset 0 -2px 0 #22c55e !important;
-    }
-    .kte-picker-tab-label {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      height: 100%;
-    }
+    /* Native emote picker tab — no custom styles needed; native Tailwind classes handle it */
     #kte-picker-content {
       padding: 4px 20px 12px;
       color: #efeff1;
@@ -981,8 +964,8 @@
     const ns = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(ns, 'svg');
     svg.setAttribute('viewBox', '0 0 20 20');
-    svg.setAttribute('width', '32');
-    svg.setAttribute('height', '32');
+    svg.setAttribute('width', '28');
+    svg.setAttribute('height', '28');
     svg.setAttribute('fill', 'none');
     svg.setAttribute('aria-hidden', 'true');
 
@@ -1014,11 +997,11 @@
     tab.setAttribute('data-active', 'false');
     if (nativeTab) tab.className = nativeTab.className;
 
-    const label = document.createElement('span');
-    label.className = 'kte-picker-tab-label';
-    label.appendChild(pickerBuildTabIcon());
+    tab.appendChild(pickerBuildTabIcon());
 
-    tab.appendChild(label);
+    const underline = document.createElement('div');
+    underline.className = 'betterhover:group-hover:bg-[#475054] z-common h-0.5 w-full transition-colors duration-300 group-data-[active=true]:!bg-green-500';
+    tab.appendChild(underline);
     return tab;
   }
 
