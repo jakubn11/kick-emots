@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.4.4
+// @version      2.4.5
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -200,7 +200,14 @@
 
     /* Native emote picker tab */
     #kte-picker-tab {
-      position: relative;
+      box-shadow: inset 0 -2px 0 transparent;
+      transition: box-shadow 300ms;
+    }
+    #kte-picker-tab:hover {
+      box-shadow: inset 0 -2px 0 #475054;
+    }
+    #kte-picker-tab[data-active="true"] {
+      box-shadow: inset 0 -2px 0 #22c55e !important;
     }
     .kte-picker-tab-label {
       display: flex;
@@ -208,21 +215,6 @@
       justify-content: center;
       width: 100%;
       height: 100%;
-    }
-    .kte-picker-underline {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background: transparent;
-      transition: background-color 300ms;
-    }
-    #kte-picker-tab:hover .kte-picker-underline {
-      background: #475054;
-    }
-    #kte-picker-tab[data-active="true"] .kte-picker-underline {
-      background: #22c55e !important;
     }
     #kte-picker-content {
       padding: 4px 20px 12px;
@@ -1026,10 +1018,7 @@
     label.className = 'kte-picker-tab-label';
     label.appendChild(pickerBuildTabIcon());
 
-    const underline = document.createElement('div');
-    underline.className = 'kte-picker-underline';
-
-    tab.append(label, underline);
+    tab.appendChild(label);
     return tab;
   }
 
