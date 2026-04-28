@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.4.1
+// @version      2.4.0
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -200,11 +200,14 @@
 
     /* Native emote picker tab */
     .kte-picker-tab-label {
-      flex: 1;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding-bottom: 4px;
+      background: #24282c;
+      flex-shrink: 0;
     }
     .kte-picker-underline {
       height: 2px;
@@ -984,8 +987,8 @@
     const ns = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(ns, 'svg');
     svg.setAttribute('viewBox', '0 0 20 20');
-    svg.setAttribute('width', '24');
-    svg.setAttribute('height', '24');
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
     svg.setAttribute('fill', 'none');
     svg.setAttribute('aria-hidden', 'true');
 
