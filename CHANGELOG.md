@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.3.4] - 2026-04-28
+
+### Fixed
+- Page freeze when scrolling the emote picker up and down repeatedly. `content-visibility: auto` was deferring layout for off-screen sections and then forcing a full layout burst for all child buttons the moment a section scrolled back into view. Since IntersectionObserver lazy loading already ensures off-screen sections contain no buttons, `content-visibility: auto` was redundant and only caused scroll jank. Removed.
+
 ## [2.3.3] - 2026-04-28
 
 ### Fixed
