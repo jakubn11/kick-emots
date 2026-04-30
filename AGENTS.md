@@ -27,7 +27,7 @@ Manual testing is required in Safari:
 2. Open a Kick channel page.
 3. Check the Safari developer console for `[KickEmotes]` log lines.
 4. Verify global and channel emotes render in chat.
-5. Verify autocomplete attaches to the chat input and supports arrow navigation, Tab/Enter selection, and Esc close.
+5. Verify autocomplete attaches to the chat input and supports arrow navigation, Tab selection, and Esc close.
 6. Navigate between Kick channels and confirm channel-specific emotes reload.
 
 ## Userscript Metadata
