@@ -676,7 +676,7 @@
 
     const footer = document.createElement('div');
     footer.id = 'kte-ac-footer';
-    footer.textContent = '↑↓ navigate  ·  Tab / Enter select  ·  Esc close';
+    footer.textContent = '↑↓ navigate  ·  Tab select  ·  Esc close';
     popup.appendChild(footer);
 
     // Anchor to left edge of input, open upward
@@ -695,8 +695,9 @@
     if (!acDropdown) return;
     if (e.key === 'ArrowDown')  { e.preventDefault(); acSetFocus(Math.min(acFocusIdx + 1, acMatches.length - 1)); }
     else if (e.key === 'ArrowUp')   { e.preventDefault(); acSetFocus(Math.max(acFocusIdx - 1, 0)); }
-    else if (e.key === 'Tab' || e.key === 'Enter') {
-      if (acFocusIdx >= 0 && acMatches[acFocusIdx]) { e.preventDefault(); acCommit(acMatches[acFocusIdx].code); }
+    else if (e.key === 'Tab') {
+      if (acMatches.length === 1) { e.preventDefault(); acCommit(acMatches[0].code); }
+      else if (acFocusIdx >= 0 && acMatches[acFocusIdx]) { e.preventDefault(); acCommit(acMatches[acFocusIdx].code); }
     }
     else if (e.key === 'Escape') { e.preventDefault(); acHide(); }
   }
