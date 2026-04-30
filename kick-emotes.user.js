@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.4.11
+// @version      2.4.12
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -259,32 +259,15 @@
 
   // ─── HTTP ─────────────────────────────────────────────────────────────────
 
-  function fetchJSON(url) {
+  function fetchJSON(url, body) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
-        method: 'GET',
+        method: body ? 'POST' : 'GET',
         url,
-        headers: { Accept: 'application/json' },
-        onload(res) {
-          if (res.status >= 200 && res.status < 300) {
-            try { resolve(JSON.parse(res.responseText)); }
-            catch (e) { reject(e); }
-          } else {
-            reject(new Error(`HTTP ${res.status}`));
-          }
-        },
-        onerror: reject,
-      });
-    });
-  }
-
-  function fetchGQL(query) {
-    return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: 'POST',
-        url: SEVENTV_GQL,
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        data: JSON.stringify({ query }),
+        headers: body
+          ? { 'Content-Type': 'application/json', Accept: 'application/json' }
+          : { Accept: 'application/json' },
+        data: body ? JSON.stringify(body) : undefined,
         onload(res) {
           if (res.status >= 200 && res.status < 300) {
             try { resolve(JSON.parse(res.responseText)); }
@@ -400,7 +383,7 @@
         }
       } } }`;
       try {
-        const res = await fetchGQL(query);
+        const res = await fetchJSON(SEVENTV_GQL, { query });
         const items = res?.data?.users?.search?.items ?? [];
         const slugLower = slug.toLowerCase();
         const user =
@@ -667,7 +650,7 @@
 
       const srcEl = document.createElement('span');
       srcEl.className = 'kte-ac-src';
-      srcEl.textContent = emote.source.split(' ')[0]; // "BTTV", "7TV", "FFZ"
+      srcEl.textContent = emote.source.split(' ')[0];
 
       row.append(img, nameEl, srcEl);
       row.addEventListener('mousedown', e => { e.preventDefault(); acCommit(code); });
@@ -783,10 +766,6 @@
     }
   }
 
-  function pickerProviderName(source) {
-    return source.split(' ')[0];
-  }
-
   function pickerBuildContent(query) {
     const wrap  = document.createElement('div');
     wrap.id     = 'kte-picker-content';
@@ -797,7 +776,7 @@
     const groups = new Map();
     for (const [code, emote] of emoteMap) {
       if (lower && !code.toLowerCase().includes(lower)) continue;
-      const source = pickerProviderName(emote.source);
+      const source = emote.source.split(' ')[0];
       if (!groups.has(source)) groups.set(source, []);
       groups.get(source).push({ code, emote });
     }
@@ -1164,10 +1143,6 @@
     panel.querySelector('#kte-picker-content')?.remove();
   }
 
-  function watchPicker() {
-    queuePickerInject();
-  }
-
   // ─── Chat Observer ────────────────────────────────────────────────────────
 
   function startChatObserver() {
@@ -1222,25 +1197,27 @@
     startChatObserver();
     processAllVisible();
     waitForInput();
-    watchPicker();
+    queuePickerInject();
   }
 
   // ─── SPA Routing ──────────────────────────────────────────────────────────
 
-  new MutationObserver(() => {
-    if (location.pathname === lastPath) return;
-    lastPath = location.pathname;
+  function handleNavigation() {
     chatObserver?.disconnect(); chatObserver = null;
     resetPicker();
     setTimeout(init, 1200);
+  }
+
+  new MutationObserver(() => {
+    if (location.pathname === lastPath) return;
+    lastPath = location.pathname;
+    handleNavigation();
   }).observe(document.documentElement, { childList: true, subtree: false });
 
   window.addEventListener('popstate', () => {
     if (location.pathname !== lastPath) {
       lastPath = location.pathname;
-      chatObserver?.disconnect(); chatObserver = null;
-      resetPicker();
-      setTimeout(init, 1200);
+      handleNavigation();
     }
   });
 
