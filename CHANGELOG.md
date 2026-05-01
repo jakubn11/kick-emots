@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.6.2] - 2026-05-01
+
+### Fixed
+- Reverted history.pushState/replaceState patching — Kick's Next.js framework calls replaceState during hydration which triggered handleNavigation(), resetting waitForDOMThenInit mid-poll and breaking first-load. Restored the MutationObserver approach which is immune to this.
+
 ## [2.6.1] - 2026-05-01
 
 ### Security

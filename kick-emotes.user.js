@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.1
+// @version      2.6.2
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -1228,18 +1228,18 @@
     setTimeout(tryInit, 300);
   }
 
-  function onPathChange() {
+  new MutationObserver(() => {
     if (location.pathname === lastPath) return;
     lastPath = location.pathname;
     handleNavigation();
-  }
+  }).observe(document.body, { childList: true, subtree: true });
 
-  // Patch history API to catch programmatic SPA navigation without a body MutationObserver
-  const _origPush    = history.pushState.bind(history);
-  const _origReplace = history.replaceState.bind(history);
-  history.pushState    = (...a) => { _origPush(...a);    onPathChange(); };
-  history.replaceState = (...a) => { _origReplace(...a); onPathChange(); };
-  window.addEventListener('popstate', onPathChange);
+  window.addEventListener('popstate', () => {
+    if (location.pathname !== lastPath) {
+      lastPath = location.pathname;
+      handleNavigation();
+    }
+  });
 
   document.readyState === 'loading'
     ? document.addEventListener('DOMContentLoaded', waitForDOMThenInit)
