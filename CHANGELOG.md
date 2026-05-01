@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.5.2] - 2026-05-01
+
+### Removed
+- Live emote preview bar — inline replacement is not feasible in Kick's Lexical editor without API access, and the strip approach was not the right UX. Autocomplete remains the primary emote input method.
+
 ## [2.5.1] - 2026-05-01
 
 ### Fixed

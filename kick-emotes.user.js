@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.5.1
+// @version      2.5.2
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -196,26 +196,6 @@
       color: #52525b;
       padding: 3px 10px 6px;
       border-top: 1px solid #27272a;
-    }
-
-    /* Live emote preview bar above the chat input */
-    #kte-preview {
-      padding: 5px 10px;
-      background: #0e0f10;
-      border: 1px solid #3f3f46;
-      border-radius: 6px;
-      font-size: 14px;
-      color: #efeff1;
-      font-family: sans-serif;
-      line-height: 2;
-      word-break: break-word;
-    }
-    #kte-preview img {
-      height: 24px;
-      width: auto;
-      max-width: 96px;
-      vertical-align: middle;
-      display: inline;
     }
 
     /* Native emote picker tab — no custom styles needed; native Tailwind classes handle it */
@@ -689,7 +669,6 @@
   }
 
   function acOnInput(e) {
-    previewUpdate(e.currentTarget);
     const word    = acWordBeforeCursor(e.currentTarget);
     const matches = acSearch(word);
     matches.length ? acRender(matches, e.currentTarget) : acHide();
@@ -706,68 +685,12 @@
     else if (e.key === 'Escape') { e.preventDefault(); acHide(); }
   }
 
-  // ─── Live emote preview bar ───────────────────────────────────────────────
-
-  let previewBar = null;
-
-  function previewHide() {
-    previewBar?.remove();
-    previewBar = null;
-  }
-
-  function previewUpdate(inputEl) {
-    // Defer one frame so Lexical can finish reconciling the DOM before we read textContent
-    requestAnimationFrame(() => _previewRender(inputEl));
-  }
-
-  function _previewRender(inputEl) {
-    const text = inputEl.textContent ?? '';
-    if (!text.trim()) { previewHide(); return; }
-
-    const tokens = text.split(/(\s+)/);
-    const hasEmote = tokens.some(t => emoteMap.has(t));
-    if (!hasEmote) { previewHide(); return; }
-
-    if (!previewBar) {
-      previewBar = document.createElement('div');
-      previewBar.id = 'kte-preview';
-    }
-
-    // Inject above the chat input wrapper if not already placed
-    const wrapper = inputEl.closest('#chat-input-wrapper')
-      ?? inputEl.closest('[id*="chat"]')
-      ?? inputEl.parentElement;
-    if (wrapper?.parentElement && !wrapper.parentElement.contains(previewBar)) {
-      wrapper.parentElement.insertBefore(previewBar, wrapper);
-    }
-
-    // Rebuild content
-    previewBar.textContent = '';
-    for (const token of tokens) {
-      const emote = emoteMap.get(token);
-      if (emote) {
-        const img = document.createElement('img');
-        img.src      = emote.url;
-        img.alt      = token;
-        img.title    = `${token} · ${emote.source}`;
-        img.draggable = false;
-        previewBar.appendChild(img);
-      } else {
-        previewBar.appendChild(document.createTextNode(token));
-      }
-    }
-  }
-
   function attachAutocomplete(el) {
     if (el._kteAC) return;
     el._kteAC = true;
     el.addEventListener('input',   acOnInput);
     el.addEventListener('keydown', acOnKeydown);
-    el.addEventListener('keydown', e => {
-      // After Enter, Kick clears the input programmatically (no input event fires)
-      if (e.key === 'Enter' && !e.shiftKey) setTimeout(previewHide, 100);
-    });
-    el.addEventListener('blur', () => setTimeout(() => { acHide(); previewHide(); }, 150));
+    el.addEventListener('blur',    () => setTimeout(acHide, 150));
     console.log(`${TAG} Autocomplete attached`);
   }
 
@@ -1263,7 +1186,6 @@
     channelSlug = slug;
     emoteMap.clear();
     acHide();
-    previewHide();
     console.log(`${TAG} Loading emotes for /${channelSlug}…`);
 
     await Promise.allSettled([loadBTTVGlobal(), load7TVGlobal(), loadFFZGlobal()]);
