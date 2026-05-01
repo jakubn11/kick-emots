@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.6.1] - 2026-05-01
+
+### Security
+- Validate all API-supplied emote URLs against `https://` before assigning to `img.src`, guarding against a compromised provider CDN returning `javascript:` or `data:` URIs.
+- Validate localStorage cache entries are arrays before iterating; corrupted or tampered cache entries are now evicted rather than trusted.
+
+### Performance
+- Replace the always-on `document.body` MutationObserver used for SPA navigation detection with `history.pushState` / `history.replaceState` patches and a `popstate` listener — eliminates a callback that previously fired on every DOM mutation across the page.
+- Merge 7 separate `document.querySelectorAll` calls in `processAllVisible` into a single call with a joined selector.
+
 ## [2.6.0] - 2026-05-01
 
 ### Changed

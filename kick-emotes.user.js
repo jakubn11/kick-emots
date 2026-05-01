@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.0
+// @version      2.6.1
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -63,7 +63,7 @@
         const raw = localStorage.getItem(`kte_${key}`);
         if (!raw) return null;
         const { ts, data } = JSON.parse(raw);
-        if (Date.now() - ts > CACHE_TTL) { localStorage.removeItem(`kte_${key}`); return null; }
+        if (!Array.isArray(data) || Date.now() - ts > CACHE_TTL) { localStorage.removeItem(`kte_${key}`); return null; }
         return data;
       } catch { return null; }
     },
@@ -253,6 +253,14 @@
     }
   `;
   (document.head ?? document.documentElement).appendChild(_style);
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  // Reject anything that isn't a plain https URL — guards against a compromised
+  // provider CDN returning javascript: or data: URIs into img.src.
+  function safeUrl(url) {
+    return typeof url === 'string' && url.startsWith('https://') ? url : '';
+  }
 
   // ─── HTTP ─────────────────────────────────────────────────────────────────
 
@@ -453,7 +461,7 @@
     wrap.className = 'kte-wrap';
 
     const img = document.createElement('img');
-    img.src = emote.url;
+    img.src = safeUrl(emote.url);
     img.alt = code;
     img.className = 'kte-img';
     img.loading = 'lazy';
@@ -484,7 +492,7 @@
         if (emote.zeroWidth && lastWrap) {
           // Overlay this image centred on the previous emote wrap
           const zw = document.createElement('img');
-          zw.src = emote.url;
+          zw.src = safeUrl(emote.url);
           zw.alt = token;
           zw.className = 'kte-zw';
           zw.loading = 'lazy';
@@ -527,7 +535,7 @@
   }
 
   function processAllVisible() {
-    for (const sel of MSG_SELECTORS) document.querySelectorAll(sel).forEach(processMessageEl);
+    document.querySelectorAll(MSG_SELECTORS.join(', ')).forEach(processMessageEl);
   }
 
   // ─── Autocomplete ─────────────────────────────────────────────────────────
@@ -639,7 +647,7 @@
       row.className = 'kte-ac-row';
 
       const img = document.createElement('img');
-      img.src = emote.url;
+      img.src = safeUrl(emote.url);
       img.alt = code;
 
       const nameEl = document.createElement('span');
@@ -725,7 +733,7 @@
         btn.setAttribute('aria-label', `Insert ${code}`);
         btn.dataset.code = code;
         const img = document.createElement('img');
-        img.src       = emote.url;
+        img.src       = safeUrl(emote.url);
         img.alt       = code;
         img.draggable = false;
         img.decoding  = 'async';
@@ -1220,18 +1228,18 @@
     setTimeout(tryInit, 300);
   }
 
-  new MutationObserver(() => {
+  function onPathChange() {
     if (location.pathname === lastPath) return;
     lastPath = location.pathname;
     handleNavigation();
-  }).observe(document.body, { childList: true, subtree: true });
+  }
 
-  window.addEventListener('popstate', () => {
-    if (location.pathname !== lastPath) {
-      lastPath = location.pathname;
-      handleNavigation();
-    }
-  });
+  // Patch history API to catch programmatic SPA navigation without a body MutationObserver
+  const _origPush    = history.pushState.bind(history);
+  const _origReplace = history.replaceState.bind(history);
+  history.pushState    = (...a) => { _origPush(...a);    onPathChange(); };
+  history.replaceState = (...a) => { _origReplace(...a); onPathChange(); };
+  window.addEventListener('popstate', onPathChange);
 
   document.readyState === 'loading'
     ? document.addEventListener('DOMContentLoaded', waitForDOMThenInit)
