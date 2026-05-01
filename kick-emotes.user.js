@@ -198,27 +198,24 @@
       border-top: 1px solid #27272a;
     }
 
-    /* Inline emote replacement inside the chat input */
-    .kte-inline-emote {
-      display: inline-block;
-      vertical-align: middle;
-      contenteditable: false;
-      user-select: all;
+    /* Live emote preview bar above the chat input */
+    #kte-preview {
+      padding: 5px 10px;
+      background: #0e0f10;
+      border: 1px solid #3f3f46;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #efeff1;
+      font-family: sans-serif;
+      line-height: 2;
+      word-break: break-word;
     }
-    .kte-inline-emote img {
-      height: 22px;
+    #kte-preview img {
+      height: 24px;
       width: auto;
-      max-width: 88px;
+      max-width: 96px;
       vertical-align: middle;
-      display: inline-block;
-      pointer-events: none;
-    }
-    .kte-inline-code {
-      font-size: 0;
-      line-height: 0;
-      color: transparent;
-      pointer-events: none;
-      user-select: none;
+      display: inline;
     }
 
     /* Native emote picker tab — no custom styles needed; native Tailwind classes handle it */
@@ -692,7 +689,7 @@
   }
 
   function acOnInput(e) {
-    inlineReplaceEmote(e.currentTarget);
+    previewUpdate(e.currentTarget);
     const word    = acWordBeforeCursor(e.currentTarget);
     const matches = acSearch(word);
     matches.length ? acRender(matches, e.currentTarget) : acHide();
@@ -709,84 +706,51 @@
     else if (e.key === 'Escape') { e.preventDefault(); acHide(); }
   }
 
-  let _inlineReplacing = false;
+  // ─── Live emote preview bar ───────────────────────────────────────────────
 
-  function inlineReplaceEmote(inputEl) {
-    if (_inlineReplacing) return;
-    if (inputEl.tagName === 'TEXTAREA' || inputEl.tagName === 'INPUT') return;
+  let previewBar = null;
 
-    const sel = window.getSelection();
-    if (!sel?.rangeCount || !sel.isCollapsed) return;
-
-    const range = sel.getRangeAt(0);
-    const node  = range.startContainer;
-    if (node.nodeType !== Node.TEXT_NODE || !inputEl.contains(node)) return;
-
-    const offset = range.startOffset;
-    const before = node.textContent.slice(0, offset);
-    const match  = before.match(/(\S+) $/);
-    if (!match) return;
-
-    const code  = match[1];
-    const emote = emoteMap.get(code);
-    if (!emote) return;
-
-    const wordStart = before.length - match[0].length;
-
-    const replaceRange = document.createRange();
-    replaceRange.setStart(node, wordStart);
-    replaceRange.setEnd(node, offset);
-
-    const span = document.createElement('span');
-    span.contentEditable = 'false';
-    span.className = 'kte-inline-emote';
-    span.dataset.kteCode = code;
-
-    const img = document.createElement('img');
-    img.src      = emote.url;
-    img.alt      = code;
-    img.draggable = false;
-    img.title    = `${code} · ${emote.source}`;
-
-    const hiddenCode = document.createElement('span');
-    hiddenCode.className   = 'kte-inline-code';
-    hiddenCode.textContent = code;
-
-    span.appendChild(img);
-    span.appendChild(hiddenCode);
-
-    replaceRange.deleteContents();
-    replaceRange.insertNode(span);
-
-    // Place a space text node after the span and move cursor there
-    const spaceNode = document.createTextNode(' ');
-    span.after(spaceNode);
-
-    const newRange = document.createRange();
-    newRange.setStart(spaceNode, 1);
-    newRange.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(newRange);
+  function previewHide() {
+    previewBar?.remove();
+    previewBar = null;
   }
 
-  function inlineRestoreText(inputEl) {
-    const spans = inputEl.querySelectorAll('.kte-inline-emote');
-    if (!spans.length) return;
-    spans.forEach(span => {
-      const code = span.dataset.kteCode ?? '';
-      span.replaceWith(document.createTextNode(code + ' '));
-    });
-    inputEl.normalize();
-    inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true }));
-  }
+  function previewUpdate(inputEl) {
+    const text = inputEl.textContent ?? '';
+    if (!text.trim()) { previewHide(); return; }
 
-  function inlineOnKeydown(e) {
-    if (e.key !== 'Enter' || e.shiftKey) return;
-    const inputEl = e.currentTarget;
-    if (!inputEl.querySelector?.('.kte-inline-emote')) return;
-    _inlineReplacing = true;
-    inlineRestoreText(inputEl);
-    _inlineReplacing = false;
+    const tokens = text.split(/(\s+)/);
+    const hasEmote = tokens.some(t => emoteMap.has(t));
+    if (!hasEmote) { previewHide(); return; }
+
+    if (!previewBar) {
+      previewBar = document.createElement('div');
+      previewBar.id = 'kte-preview';
+    }
+
+    // Inject above the chat input wrapper if not already placed
+    const wrapper = inputEl.closest('#chat-input-wrapper')
+      ?? inputEl.closest('[id*="chat"]')
+      ?? inputEl.parentElement;
+    if (wrapper?.parentElement && !wrapper.parentElement.contains(previewBar)) {
+      wrapper.parentElement.insertBefore(previewBar, wrapper);
+    }
+
+    // Rebuild content
+    previewBar.textContent = '';
+    for (const token of tokens) {
+      const emote = emoteMap.get(token);
+      if (emote) {
+        const img = document.createElement('img');
+        img.src      = emote.url;
+        img.alt      = token;
+        img.title    = `${token} · ${emote.source}`;
+        img.draggable = false;
+        previewBar.appendChild(img);
+      } else {
+        previewBar.appendChild(document.createTextNode(token));
+      }
+    }
   }
 
   function attachAutocomplete(el) {
@@ -794,7 +758,6 @@
     el._kteAC = true;
     el.addEventListener('input',   acOnInput);
     el.addEventListener('keydown', acOnKeydown);
-    el.addEventListener('keydown', inlineOnKeydown, true); // capture: restore text before Kick's submit
     el.addEventListener('blur',    () => setTimeout(acHide, 150));
     console.log(`${TAG} Autocomplete attached`);
   }
@@ -1291,6 +1254,7 @@
     channelSlug = slug;
     emoteMap.clear();
     acHide();
+    previewHide();
     console.log(`${TAG} Loading emotes for /${channelSlug}…`);
 
     await Promise.allSettled([loadBTTVGlobal(), load7TVGlobal(), loadFFZGlobal()]);

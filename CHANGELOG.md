@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [2.5.0] - 2026-05-01
 
 ### Added
-- Inline emote preview in the chat input: typing a known emote code followed by a space now replaces the text with the emote image, matching Kick's native emote behaviour. The original code is preserved as hidden text so the message is sent correctly for other viewers. Pressing Enter restores plain text before submission.
+- Live emote preview bar above the chat input: as you type, any recognised emote codes are rendered as images in a preview strip above the input. The preview hides automatically when there are no emotes in the message or when the input is cleared. The actual message text is unchanged so messages send correctly for all viewers.
 
 ## [2.4.14] - 2026-05-01
 
