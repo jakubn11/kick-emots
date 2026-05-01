@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.6.4] - 2026-05-01
+
+### Performance
+- Replace `localeCompare` with direct string comparison in the emote picker sort and autocomplete sort — eliminates locale-sensitive collation overhead on every channel switch and every autocomplete keystroke.
+
 ## [2.6.3] - 2026-05-01
 
 ### Fixed

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.3
+// @version      2.6.4
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -570,7 +570,7 @@
     for (const [code, emote] of emoteMap) {
       if (code.toLowerCase().startsWith(lower)) results.push({ code, emote });
     }
-    results.sort((a, b) => a.code.length - b.code.length || a.code.localeCompare(b.code));
+    results.sort((a, b) => a.code.length - b.code.length || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
     return results.slice(0, 8);
   }
 
@@ -803,7 +803,7 @@
     for (const [source, emotes] of orderedGroups) {
       if (!emotes.length) continue;
       any = true;
-      emotes.sort((a, b) => a.code.localeCompare(b.code));
+      emotes.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 
       const section = document.createElement('div');
       section.className = 'kte-picker-section grid gap-2';
