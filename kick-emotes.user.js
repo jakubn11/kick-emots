@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.22
+// @version      2.6.23
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -34,6 +34,12 @@
   const SEVENTV_GQL = 'https://7tv.io/v4/gql';
   const FFZ_API     = 'https://api.frankerfacez.com/v1';
 
+  const ALLOWED_CDN_HOSTS = new Set([
+    'cdn.betterttv.net',
+    'cdn.7tv.app',
+    'cdn.frankerfacez.com',
+  ]);
+
   // Kick may change class names; list fallbacks in priority order.
   const MSG_SELECTORS = [
     'div[style*="--chatroom-font-size"]',   // current Kick DOM (2025+)
@@ -57,13 +63,22 @@
 
   const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
+  function isValidCacheEntry(e) {
+    return Array.isArray(e) && typeof e[0] === 'string' &&
+      typeof e[1]?.url === 'string' && e[1].url.startsWith('https://') &&
+      typeof e[1]?.source === 'string';
+  }
+
   const Cache = {
     get(key) {
       try {
         const raw = localStorage.getItem(`kte_${key}`);
         if (!raw) return null;
         const { ts, data } = JSON.parse(raw);
-        if (!Array.isArray(data) || Date.now() - ts > CACHE_TTL) { localStorage.removeItem(`kte_${key}`); return null; }
+        if (!Array.isArray(data) || Date.now() - ts > CACHE_TTL || !data.every(isValidCacheEntry)) {
+          localStorage.removeItem(`kte_${key}`);
+          return null;
+        }
         return data;
       } catch { return null; }
     },
@@ -316,10 +331,13 @@
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  // Reject anything that isn't a plain https URL — guards against a compromised
-  // provider CDN returning javascript: or data: URIs into img.src.
+  // Reject URLs that aren't https: or don't come from a known emote CDN.
+  // Prevents a compromised provider API from loading arbitrary tracking pixels.
   function safeUrl(url) {
-    return typeof url === 'string' && url.startsWith('https://') ? url : '';
+    try {
+      const { protocol, hostname } = new URL(url);
+      return protocol === 'https:' && ALLOWED_CDN_HOSTS.has(hostname) ? url : '';
+    } catch { return ''; }
   }
 
   function RIC(cb) {

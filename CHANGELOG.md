@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.6.23] - 2026-05-02
+
+### Security
+- Tighten `safeUrl`: validate emote image URLs against an allowlist of known CDN hostnames (`cdn.betterttv.net`, `cdn.7tv.app`, `cdn.frankerfacez.com`) in addition to requiring `https:` — prevents a compromised provider API from loading arbitrary URLs.
+- Validate the shape of each entry read back from the `localStorage` cache; discard and evict the cache key if any entry fails validation.
+
 ## [2.6.22] - 2026-05-02
 
 ### Fixed
