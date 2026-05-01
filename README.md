@@ -1,6 +1,18 @@
-# Kick Third-Party Emotes
+<p align="center">
+  <img src="icon.svg" width="96" height="96" alt="Kick Third-Party Emotes icon">
+</p>
 
-Safari userscript that adds **BetterTTV**, **7TV**, and **FrankerFaceZ** emotes to [Kick.com](https://kick.com) chat.
+<h1 align="center">Kick Third-Party Emotes</h1>
+
+<p align="center">
+  <strong>Safari userscript that adds BetterTTV, 7TV, and FrankerFaceZ emotes to Kick.com chat.</strong>
+</p>
+
+<p align="center">
+  <img alt="Safari userscript" src="https://img.shields.io/badge/Safari-userscript-18181b?style=for-the-badge&labelColor=22c55e">
+  <img alt="Animated emotes" src="https://img.shields.io/badge/Animated-emotes-18181b?style=for-the-badge&labelColor=22c55e">
+  <img alt="Load more picker" src="https://img.shields.io/badge/Load%20more-picker-18181b?style=for-the-badge&labelColor=22c55e">
+</p>
 
 ## Features
 
@@ -10,7 +22,7 @@ Safari userscript that adds **BetterTTV**, **7TV**, and **FrankerFaceZ** emotes 
 - Zero-width 7TV emote overlays
 - Hover tooltips showing emote name and provider
 - Autocomplete popup when typing (prefix match, keyboard navigation)
-- Third-party emote tab inside Kick's native emote picker with search and lazy rendering
+- Third-party emote tab inside Kick's native emote picker with search, animated emotes, and per-provider **Load more**
 - 1-hour localStorage cache per provider to avoid redundant API requests
 - Works with Kick's SPA routing — no page reload needed when switching channels
 
