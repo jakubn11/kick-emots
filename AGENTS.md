@@ -163,3 +163,9 @@ Before committing any change, always:
 
 2. **Update `CHANGELOG.md`** — add an entry under the new version with a short summary of what changed.
 3. **Update `README.md`** if the change is user-facing: new or removed features, changed behaviour, new keyboard shortcuts, provider changes, or updated troubleshooting steps. Internal refactors and bug fixes that don't change user-facing behaviour do not require a README update.
+4. **Suggest a GitHub Release** after every commit if any of the following apply — say "this looks like a good point to publish a GitHub Release":
+   - A security fix was made
+   - A user-facing feature was added (new provider, new UI component, new keyboard shortcut)
+   - A bug affecting core functionality was fixed (emotes not loading, autocomplete broken, picker missing)
+
+   Do NOT suggest a release for: docs-only changes, internal refactors, formatting, style tweaks the user won't notice.
