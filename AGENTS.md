@@ -108,6 +108,36 @@ Autocomplete is intentionally lightweight and local:
 
 If modifying autocomplete, test both insertion and keyboard handling in the actual Kick chat input.
 
+## Security
+
+### Rules — always follow these
+
+- **Never use `innerHTML`, `outerHTML`, or `insertAdjacentHTML`** with any data that comes from a provider API, the DOM, or user input. Use `textContent` for text and `createElement` + `appendChild` for structure.
+- **Always pass emote image URLs through `safeUrl()`** before assigning to `img.src`. `safeUrl` validates both the protocol (`https:`) and the hostname against `ALLOWED_CDN_HOSTS`. Never bypass it.
+- **Never add a new CDN domain to `ALLOWED_CDN_HOSTS` without a clear reason.** Each entry is a trusted image source. Adding one carelessly expands the attack surface.
+- **Never use native `title` attributes** on script-injected elements. Use `data-kte-tip` + `showTooltip`/`hideTooltip` instead (see UI Design System).
+- **Never use `eval`, `new Function(string)`, `setTimeout(string)`, or `setInterval(string)`.**
+- **Never trust provider API responses without validation.** Use optional chaining (`?.`) and nullish defaults. Validate shapes before use — see `isValidCacheEntry` as a reference.
+- **Never store sensitive data in `localStorage`.** The cache only stores emote codes, URLs, and source names — nothing user-specific.
+- **Never read back `localStorage` data without validation.** Always run it through the cache schema check (`isValidCacheEntry`) before putting it into `emoteMap`.
+
+### Checks — run mentally before every commit
+
+- Does any new code assign untrusted data to `innerHTML` or similar? → Fix it.
+- Does any new code load an image URL without going through `safeUrl`? → Fix it.
+- Does any new code add a `title` attribute to an injected element? → Replace with `data-kte-tip`.
+- Does any new code fetch from a domain not in `@connect`? → Add it to the metadata and justify why.
+- Does any new code introduce a new `localStorage` key? → Make sure reads are validated.
+- Does any new code use string-based dynamic execution (`eval`, etc.)? → Remove it.
+
+### Existing security measures (do not remove or weaken)
+
+- `safeUrl()` — CDN allowlist + `https:` protocol check on all emote image URLs
+- `isValidCacheEntry()` — schema validation on every `localStorage` cache read
+- `ALLOWED_CDN_HOSTS` — explicit set of trusted image hostnames
+- `try/catch` on all `localStorage` reads — handles quota errors and malformed JSON silently
+- All DOM text written via `textContent` — no HTML injection possible
+
 ## UI Design System
 
 All script-injected UI must follow this design language consistently. Do not deviate from it when adding new popups, overlays, or controls.
