@@ -17,12 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [2.6.20] - 2026-05-02
 
 ### Changed
-- Reintroduce green as a signature accent across all popups: green left stripe on tooltip, green top border and header label on autocomplete, green source badges and hover highlight.
-
-## [2.6.19] - 2026-05-02
-
-### Changed
-- Redesign autocomplete popup and emote tooltip: bold white-on-dark style, no green accents, stronger shadows, blurred glass background.
+- Redesign autocomplete popup and emote tooltip: bold white-on-dark glass style with `#22c55e` as a single structural accent per component (green left stripe on tooltip, green top border and header on autocomplete, green source badges and hover highlight).
 
 ## [2.6.18] - 2026-05-01
 

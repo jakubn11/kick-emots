@@ -7,8 +7,7 @@ Adds **BetterTTV**, **7TV**, and **FrankerFaceZ** emotes to Kick.com chat in Saf
 Safari on macOS requires a userscript host app.  
 **Userscripts** (free, by Justin Wasack) is the recommended one:
 
-1. Install **Userscripts** from the Mac App Store:  
-   `https://apps.apple.com/app/userscripts/id1463298887`
+1. Install **[Userscripts](https://apps.apple.com/app/userscripts/id1463298887)** from the Mac App Store.
 
 2. Open Safari → **Settings** → **Extensions** → enable **Userscripts**.
 
