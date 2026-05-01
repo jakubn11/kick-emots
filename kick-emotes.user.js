@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.4
+// @version      2.6.15
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker (Safari)
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -76,10 +76,13 @@
   // ─── State ────────────────────────────────────────────────────────────────
 
   const emoteMap = new Map(); // code → { url, source, animated, zeroWidth }
-  const sectionEmotesMap = new WeakMap(); // section el → { grid, emotes } for IO lazy fill
+  const memoryCache = new Map(); // provider key → entries, avoids sync localStorage parse on SPA nav
 
   let channelSlug        = null;
   let chatObserver       = null;
+  let inputObserver      = null;
+  let initSeq            = 0;
+  let emoteVersion       = 0;
   let pickerInjectQueued = false;
   let lastPath           = location.pathname;
 
@@ -197,7 +200,7 @@
 
     /* Native emote picker tab — no custom styles needed; native Tailwind classes handle it */
     #kte-picker-content {
-      padding: 4px 20px 12px;
+      padding: 4px 20px 28px;
       color: #efeff1;
       font-family: sans-serif;
       box-sizing: border-box;
@@ -205,9 +208,7 @@
       overflow-y: auto;
       overscroll-behavior: contain;
       scrollbar-gutter: stable;
-    }
-    .kte-picker-section--pending .kte-picker-provider {
-      display: none;
+      max-height: min(420px, calc(100vh - 220px));
     }
     #kte-picker-content[hidden] { display: none !important; }
     .kte-picker-provider {
@@ -251,6 +252,55 @@
       padding: 18px 8px;
       margin: 0;
     }
+    .kte-picker-limit {
+      color: #71717a;
+      font-size: 11px;
+      margin: 0;
+    }
+    .kte-picker-footer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 4px 0 2px;
+    }
+    .kte-picker-more {
+      width: fit-content;
+      border: 1px solid rgba(34, 197, 94, .55);
+      border-radius: 6px;
+      background: rgba(34, 197, 94, .12);
+      color: #dcfce7;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1;
+      padding: 7px 12px;
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: background .12s ease, border-color .12s ease, color .12s ease;
+    }
+    .kte-picker-more::before {
+      content: '';
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background:
+        linear-gradient(#101512, #101512) center / 9px 2px no-repeat,
+        linear-gradient(#101512, #101512) center / 2px 9px no-repeat,
+        #22c55e;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .kte-picker-more:hover,
+    .kte-picker-more:focus-visible {
+      background: rgba(34, 197, 94, .2);
+      border-color: rgba(34, 197, 94, .85);
+      color: #f0fdf4;
+      outline: none;
+    }
   `;
   (document.head ?? document.documentElement).appendChild(_style);
 
@@ -260,6 +310,12 @@
   // provider CDN returning javascript: or data: URIs into img.src.
   function safeUrl(url) {
     return typeof url === 'string' && url.startsWith('https://') ? url : '';
+  }
+
+  function RIC(cb) {
+    return typeof requestIdleCallback === 'function'
+      ? requestIdleCallback(cb, { timeout: 300 })
+      : setTimeout(cb, 16);
   }
 
   // ─── HTTP ─────────────────────────────────────────────────────────────────
@@ -306,20 +362,32 @@
 
   // `fetcher` must return an array of [code, emoteObj] pairs.
   async function cachedLoad(key, fetcher) {
+    if (memoryCache.has(key)) return memoryCache.get(key);
+
     const cached = Cache.get(key);
     if (cached) {
-      for (const [code, e] of cached) emoteMap.set(code, e);
-      return;
+      memoryCache.set(key, cached);
+      return cached;
     }
+
     const entries = await fetcher();
-    for (const [code, e] of entries) emoteMap.set(code, e);
-    Cache.set(key, entries);
+    const safeEntries = Array.isArray(entries) ? entries : [];
+    memoryCache.set(key, safeEntries);
+    RIC(() => Cache.set(key, safeEntries));
+    return safeEntries;
+  }
+
+  function applyLoadResults(results) {
+    for (const result of results) {
+      if (result.status !== 'fulfilled' || !Array.isArray(result.value)) continue;
+      for (const [code, e] of result.value) emoteMap.set(code, e);
+    }
   }
 
   // ─── Emote Loaders ────────────────────────────────────────────────────────
 
   async function loadBTTVGlobal() {
-    await cachedLoad('bttv_g', async () => {
+    return cachedLoad('bttv_g', async () => {
       const emotes = await fetchJSON(`${BTTV_API}/cached/emotes/global`);
       return emotes.map(e => [e.code, {
         url: `${BTTV_CDN}/${e.id}/2x${e.animated ? '.gif' : ''}`,
@@ -331,7 +399,7 @@
   }
 
   async function loadBTTVChannel(slug) {
-    await cachedLoad(`bttv_c_${slug}`, async () => {
+    return cachedLoad(`bttv_c_${slug}`, async () => {
       for (const platform of ['kick', 'twitch']) {
         try {
           const data = await fetchJSON(`${BTTV_API}/cached/users/${platform}/${slug}`);
@@ -350,7 +418,7 @@
   }
 
   async function load7TVGlobal() {
-    await cachedLoad('7tv_g', async () => {
+    return cachedLoad('7tv_g', async () => {
       const data = await fetchJSON(`${SEVENTV_API}/emote-sets/global`);
       const entries = [];
       for (const e of (data.emotes ?? [])) {
@@ -376,7 +444,7 @@
   }
 
   async function load7TVChannel(slug) {
-    await cachedLoad(`7tv_c_${slug}`, async () => {
+    return cachedLoad(`7tv_c_${slug}`, async () => {
       // v4 GQL: search by username, find the user with a matching KICK (or TWITCH) connection
       const query = `{ users { search(query: ${JSON.stringify(slug)}, page: 1, perPage: 10) {
         items {
@@ -398,12 +466,14 @@
         const emotes = user.style?.activeEmoteSet?.emotes?.items ?? [];
         const entries = [];
         for (const e of emotes) {
-          const img = pick7TVImage(e.emote?.images ?? [], e.emote?.flags?.animated ?? false);
+          const animated = e.emote?.flags?.animated ?? false;
+          const images = e.emote?.images ?? [];
+          const img = pick7TVImage(images, animated);
           if (!img) continue;
           entries.push([e.alias, {
             url: img.url,
             source: '7TV',
-            animated: e.emote?.flags?.animated ?? false,
+            animated,
             zeroWidth: e.flags?.zeroWidth ?? false,
           }]);
         }
@@ -413,7 +483,7 @@
   }
 
   async function loadFFZGlobal() {
-    await cachedLoad('ffz_g', async () => {
+    return cachedLoad('ffz_g', async () => {
       const data = await fetchJSON(`${FFZ_API}/set/global`);
       const entries = [];
       for (const set of Object.values(data.sets ?? {})) {
@@ -433,7 +503,7 @@
   }
 
   async function loadFFZChannel(slug) {
-    await cachedLoad(`ffz_c_${slug}`, async () => {
+    return cachedLoad(`ffz_c_${slug}`, async () => {
       try {
         const data = await fetchJSON(`${FFZ_API}/room/${slug}`);
         const entries = [];
@@ -535,7 +605,28 @@
   }
 
   function processAllVisible() {
-    document.querySelectorAll(MSG_SELECTORS.join(', ')).forEach(processMessageEl);
+    const seq = initSeq;
+    const nodes = [...document.querySelectorAll(MSG_SELECTORS.join(', '))];
+    let i = 0;
+
+    function step() {
+      if (seq !== initSeq) return;
+      const end = Math.min(i + 25, nodes.length);
+      for (; i < end; i++) {
+        if (nodes[i].isConnected) processMessageEl(nodes[i]);
+      }
+      if (i < nodes.length) RIC(step);
+    }
+
+    RIC(step);
+  }
+
+  function isOwnUINode(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    return node.id === 'kte-picker-content'
+      || node.id === 'kte-ac'
+      || node.classList.contains('kte-wrap')
+      || Boolean(node.closest?.('#kte-picker-content, #kte-ac, .kte-wrap'));
   }
 
   // ─── Autocomplete ─────────────────────────────────────────────────────────
@@ -706,49 +797,75 @@
   }
 
   function waitForInput() {
+    inputObserver?.disconnect();
+    inputObserver = null;
+
     const el = acFindInput();
     if (el) { attachAutocomplete(el); return; }
-    const obs = new MutationObserver(() => {
+
+    inputObserver = new MutationObserver(() => {
       const found = acFindInput();
-      if (found) { obs.disconnect(); attachAutocomplete(found); }
+      if (found) {
+        inputObserver?.disconnect();
+        inputObserver = null;
+        attachAutocomplete(found);
+      }
     });
-    obs.observe(document.body, { childList: true, subtree: true });
+    inputObserver.observe(document.body, { childList: true, subtree: true });
   }
 
   // ─── Emote Picker ─────────────────────────────────────────────────────────
 
-  const RIC = typeof requestIdleCallback === 'function'
-    ? (cb) => requestIdleCallback(cb, { timeout: 300 })
-    : (cb) => setTimeout(cb, 16);
+  const PICKER_PROVIDER_LIMIT = 80;
 
-  const PICKER_CHUNK = 60; // buttons built per idle slice
+  function pickerBuildButton(code, emote) {
+    const btn = document.createElement('button');
+    btn.type      = 'button';
+    btn.className = 'kte-picker-btn';
+    btn.title     = `${code} · ${emote.source}`;
+    btn.setAttribute('aria-label', `Insert ${code}`);
+    btn.dataset.code = code;
 
-  function pickerFillChunked(grid, emotes) {
-    let i = 0;
-    function step() {
-      if (!grid.isConnected) return; // grid was replaced — stop the chain
-      const frag = document.createDocumentFragment();
-      const end = Math.min(i + PICKER_CHUNK, emotes.length);
-      for (; i < end; i++) {
-        const { code, emote } = emotes[i];
-        const btn = document.createElement('button');
-        btn.type      = 'button';
-        btn.className = 'kte-picker-btn';
-        btn.title     = `${code} · ${emote.source}`;
-        btn.setAttribute('aria-label', `Insert ${code}`);
-        btn.dataset.code = code;
-        const img = document.createElement('img');
-        img.src       = safeUrl(emote.url);
-        img.alt       = code;
-        img.draggable = false;
-        img.decoding  = 'async';
-        btn.appendChild(img);
-        frag.appendChild(btn);
-      }
-      grid.appendChild(frag);
-      if (i < emotes.length) RIC(step);
+    const img = document.createElement('img');
+    img.src       = safeUrl(emote.url);
+    img.alt       = code;
+    img.draggable = false;
+    img.decoding  = 'async';
+    img.loading   = 'lazy';
+    img.setAttribute('fetchpriority', 'low');
+    btn.appendChild(img);
+
+    return btn;
+  }
+
+  function pickerAppendButtons(grid, emotes, start, end) {
+    const frag = document.createDocumentFragment();
+    for (let i = start; i < end; i++) {
+      const { code, emote } = emotes[i];
+      frag.appendChild(pickerBuildButton(code, emote));
     }
-    RIC(step);
+    grid.appendChild(frag);
+  }
+
+  function pickerBuildLoadMore(grid, emotes, shown, limitEl) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'kte-picker-more';
+    more.textContent = 'Load more';
+    more.setAttribute('aria-label', 'Load more emotes');
+
+    more.addEventListener('mousedown', e => e.preventDefault());
+    more.addEventListener('click', () => {
+      const next = Math.min(shown + PICKER_PROVIDER_LIMIT, emotes.length);
+      pickerAppendButtons(grid, emotes, shown, next);
+      shown = next;
+      limitEl.textContent = `Showing ${shown} of ${emotes.length}.`;
+      if (shown >= emotes.length) {
+        more.remove();
+      }
+    });
+
+    return more;
   }
 
   function pickerInsert(code) {
@@ -795,11 +912,10 @@
     const orderedGroups = [...groups.entries()].sort(([a], [b]) => {
       const ai = providerOrder.includes(a) ? providerOrder.indexOf(a) : providerOrder.length;
       const bi = providerOrder.includes(b) ? providerOrder.indexOf(b) : providerOrder.length;
-      return ai - bi || a.localeCompare(b);
+      return ai - bi || (a < b ? -1 : a > b ? 1 : 0);
     });
 
     let any = false;
-    let firstRendered = false;
     for (const [source, emotes] of orderedGroups) {
       if (!emotes.length) continue;
       any = true;
@@ -816,19 +932,26 @@
       const grid = document.createElement('div');
       grid.className = 'kte-picker-grid';
       grid.addEventListener('mousedown', e => { if (e.target.closest('.kte-picker-btn')) e.preventDefault(); });
-      grid.addEventListener('click',     e => { const b = e.target.closest('.kte-picker-btn'); if (b?.dataset.code) pickerInsert(b.dataset.code); });
+      grid.addEventListener('click', e => {
+        const b = e.target.closest('.kte-picker-btn');
+        if (b?.dataset.code) pickerInsert(b.dataset.code);
+      });
 
-      if (!firstRendered) {
-        // First provider: start chunked fill immediately (it's already in view).
-        pickerFillChunked(grid, emotes);
-        firstRendered = true;
-      } else {
-        // Remaining providers: defer until scrolled into view.
-        section.classList.add('kte-picker-section--pending');
-        sectionEmotesMap.set(section, { grid, emotes });
+      const shown = Math.min(PICKER_PROVIDER_LIMIT, emotes.length);
+      pickerAppendButtons(grid, emotes, 0, shown);
+      section.appendChild(grid);
+
+      if (shown < emotes.length) {
+        const footer = document.createElement('div');
+        footer.className = 'kte-picker-footer';
+        const limit = document.createElement('p');
+        limit.className = 'kte-picker-limit';
+        limit.textContent = `Showing ${shown} of ${emotes.length}.`;
+        footer.appendChild(limit);
+        footer.appendChild(pickerBuildLoadMore(grid, emotes, shown, limit));
+        section.appendChild(footer);
       }
 
-      section.appendChild(grid);
       sectionsContainer.appendChild(section);
     }
 
@@ -899,32 +1022,12 @@
     ));
   }
 
-  function pickerLockElementHeight(el) {
-    if (!el || el._kteHeightLock) return;
-    const rect = el.getBoundingClientRect();
-    if (!rect.height) return;
-    el._kteHeightLock = {
-      height: el.style.height,
-      minHeight: el.style.minHeight,
-      maxHeight: el.style.maxHeight,
-    };
-    const height = `${Math.round(rect.height)}px`;
-    el.style.height = height;
-    el.style.minHeight = height;
-    el.style.maxHeight = height;
-  }
-
   function pickerUnlockElementHeight(el) {
     if (!el?._kteHeightLock) return;
     el.style.height = el._kteHeightLock.height;
     el.style.minHeight = el._kteHeightLock.minHeight;
     el.style.maxHeight = el._kteHeightLock.maxHeight;
     delete el._kteHeightLock;
-  }
-
-  function pickerLockSize(panel, parts) {
-    pickerLockElementHeight(panel);
-    pickerLockElementHeight(parts.scrollViewport);
   }
 
   function pickerUnlockSize(panel, parts) {
@@ -935,34 +1038,17 @@
   function pickerFitContent(panel, parts, content) {
     if (!content || content.hidden || !content.isConnected) return;
 
-    content.style.height = '';
+    content.style.maxHeight = '';
     const viewport = parts.scrollViewport ?? panel;
     const viewportRect = viewport.getBoundingClientRect();
     const contentRect = content.getBoundingClientRect();
     const viewportStyle = getComputedStyle(viewport);
     const bottomPadding = parseFloat(viewportStyle.paddingBottom) || 0;
-    const available = Math.floor(viewportRect.bottom - contentRect.top - bottomPadding);
+    const available = Math.floor(viewportRect.bottom - contentRect.top - bottomPadding - 2);
 
-    if (Number.isFinite(available) && available > 0) {
-      content.style.height = `${available}px`;
+    if (Number.isFinite(available) && available > 120) {
+      content.style.maxHeight = `${available}px`;
     }
-  }
-
-  function pickerObserveSections(content) {
-    if (content._kteIO) return;
-    const pending = [...content.querySelectorAll('.kte-picker-section--pending')];
-    if (!pending.length) return;
-    const io = new IntersectionObserver(entries => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        io.unobserve(entry.target);
-        entry.target.classList.remove('kte-picker-section--pending');
-        const data = sectionEmotesMap.get(entry.target);
-        if (data?.grid.isConnected) pickerFillChunked(data.grid, data.emotes);
-      }
-    }, { root: content, rootMargin: '80px 0px' });
-    pending.forEach(s => io.observe(s));
-    content._kteIO = io;
   }
 
   function pickerRefreshContent(panel) {
@@ -970,22 +1056,21 @@
     if (!parts) return null;
 
     const oldContent = panel.querySelector('#kte-picker-content');
-    oldContent?._kteIO?.disconnect();
 
     const tab = panel.querySelector('#kte-picker-tab');
     const active = tab?.getAttribute('data-active') === 'true';
-    if (active) pickerLockSize(panel, parts);
 
     const content = pickerBuildContent(parts.searchInput?.value ?? '');
     content.dataset.kteChannel = channelSlug ?? '';
+    content.dataset.kteEmoteVersion = String(emoteVersion);
     content.hidden = !active;
 
     if (oldContent) oldContent.replaceWith(content);
     else parts.mainGrid.appendChild(content);
 
     if (!content.hidden) {
+      content.scrollTop = 0;
       pickerFitContent(panel, parts, content);
-      pickerObserveSections(content);
     }
     return content;
   }
@@ -1000,9 +1085,11 @@
 
     if (content) {
       content.hidden = !active;
-      if (!active) content.style.height = '';
+      if (!active) {
+        content.style.height = '';
+        content.style.maxHeight = '';
+      }
     }
-    if (active) pickerLockSize(panel, parts);
     for (const child of pickerNativeViews(parts, content)) {
       if (active) {
         child.dataset.kteNativeHidden = '1';
@@ -1014,7 +1101,6 @@
     }
     if (content && active) {
       pickerFitContent(panel, parts, content);
-      pickerObserveSections(content);
     } else if (!active) {
       pickerUnlockSize(panel, parts);
     }
@@ -1038,27 +1124,33 @@
   function pickerBuildTabIcon() {
     const ns = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', '0 0 20 20');
+    svg.setAttribute('viewBox', '0 0 28 28');
     svg.setAttribute('width', '28');
     svg.setAttribute('height', '28');
     svg.setAttribute('fill', 'none');
     svg.setAttribute('aria-hidden', 'true');
 
-    const addCircle = (cx, cy, r, fill) => {
-      const c = document.createElementNS(ns, 'circle');
-      c.setAttribute('cx', cx); c.setAttribute('cy', cy);
-      c.setAttribute('r', r);   c.setAttribute('fill', fill);
-      svg.appendChild(c);
-    };
-    addCircle(7.5, 8, 2, '#efeff1');   // left eye
-    addCircle(12.5, 8, 2, '#efeff1');  // right eye
+    const tile = document.createElementNS(ns, 'rect');
+    tile.setAttribute('x', '4');
+    tile.setAttribute('y', '4');
+    tile.setAttribute('width', '20');
+    tile.setAttribute('height', '20');
+    tile.setAttribute('rx', '7');
+    tile.setAttribute('fill', '#22c55e');
+    svg.appendChild(tile);
 
-    const mouth = document.createElementNS(ns, 'path');
-    mouth.setAttribute('d', 'M6 13 Q10 17.5 14 13');
-    mouth.setAttribute('stroke', '#efeff1');
-    mouth.setAttribute('stroke-width', '1.8');
-    mouth.setAttribute('stroke-linecap', 'round');
-    svg.appendChild(mouth);
+    const addDot = (cx, cy) => {
+      const dot = document.createElementNS(ns, 'circle');
+      dot.setAttribute('cx', cx);
+      dot.setAttribute('cy', cy);
+      dot.setAttribute('r', '2.2');
+      dot.setAttribute('fill', '#101512');
+      svg.appendChild(dot);
+    };
+    addDot('10', '10');
+    addDot('18', '10');
+    addDot('10', '18');
+    addDot('18', '18');
 
     return svg;
   }
@@ -1116,7 +1208,11 @@
     if (tab.parentElement !== parts.tabsRow) parts.tabsRow.appendChild(tab);
 
     const content = panel.querySelector('#kte-picker-content');
-    if (!content || content.dataset.kteChannel !== (channelSlug ?? '')) pickerRefreshContent(panel);
+    if (!content
+      || content.dataset.kteChannel !== (channelSlug ?? '')
+      || content.dataset.kteEmoteVersion !== String(emoteVersion)) {
+      pickerRefreshContent(panel);
+    }
     pickerAttachSearch(panel, parts.searchInput);
     pickerAttachNativeTabs(panel, parts.tabsRow);
     pickerApplyActiveState(panel);
@@ -1131,8 +1227,10 @@
   function queuePickerInject(panel) {
     if (pickerInjectQueued) return;
     pickerInjectQueued = true;
+    const seq = initSeq;
     requestAnimationFrame(() => {
       pickerInjectQueued = false;
+      if (seq !== initSeq) return;
       const target = panel?.isConnected ? panel : document.getElementById('chat-emotes-picker-panel');
       if (target) pickerInject(target);
     });
@@ -1169,7 +1267,16 @@
         for (const added of mut.addedNodes) {
           if (added.nodeType !== Node.ELEMENT_NODE) continue;
           const pickerPanel = pickerPanelFromNode(added);
-          if (pickerPanel) queuePickerInject(pickerPanel);
+          if (pickerPanel) {
+            queuePickerInject(pickerPanel);
+            continue;
+          }
+          if (isOwnUINode(added)) continue;
+          const containingPicker = added.closest?.('#chat-emotes-picker-panel');
+          if (containingPicker) {
+            queuePickerInject(containingPicker);
+            continue;
+          }
           for (const sel of MSG_SELECTORS) {
             if (added.matches?.(sel)) processMessageEl(added);
             added.querySelectorAll?.(sel).forEach(processMessageEl);
@@ -1188,19 +1295,34 @@
   }
 
   async function init() {
+    const seq = ++initSeq;
     const slug = currentChannelSlug();
     if (!slug) {
+      channelSlug = null;
+      emoteMap.clear();
+      emoteVersion++;
+      acHide();
       resetPicker();
       return;
     }
 
     channelSlug = slug;
     emoteMap.clear();
+    emoteVersion++;
     acHide();
+    resetPicker();
     console.log(`${TAG} Loading emotes for /${channelSlug}…`);
 
-    await Promise.allSettled([loadBTTVGlobal(), load7TVGlobal(), loadFFZGlobal()]);
-    await Promise.allSettled([loadBTTVChannel(slug), load7TVChannel(slug), loadFFZChannel(slug)]);
+    const globalResults = await Promise.allSettled([loadBTTVGlobal(), load7TVGlobal(), loadFFZGlobal()]);
+    if (seq !== initSeq || currentChannelSlug() !== slug) return;
+
+    const channelResults = await Promise.allSettled([loadBTTVChannel(slug), load7TVChannel(slug), loadFFZChannel(slug)]);
+    if (seq !== initSeq || currentChannelSlug() !== slug) return;
+
+    emoteMap.clear();
+    applyLoadResults(globalResults);
+    applyLoadResults(channelResults);
+    emoteVersion++;
 
     console.log(`${TAG} Ready – ${emoteMap.size} emotes for /${channelSlug}`);
 
@@ -1213,15 +1335,22 @@
   // ─── SPA Routing ──────────────────────────────────────────────────────────
 
   function handleNavigation() {
+    initSeq++;
     chatObserver?.disconnect(); chatObserver = null;
+    inputObserver?.disconnect(); inputObserver = null;
+    emoteMap.clear();
+    emoteVersion++;
+    acHide();
     resetPicker();
     waitForDOMThenInit();
   }
 
   function waitForDOMThenInit() {
+    const seq = initSeq;
     let attempts = 0;
     const maxAttempts = 50; // ~25 seconds
     function tryInit() {
+      if (seq !== initSeq) return;
       attempts++;
       const slug = currentChannelSlug();
       if (!slug) { init(); return; }
@@ -1233,17 +1362,16 @@
     setTimeout(tryInit, 300);
   }
 
-  new MutationObserver(() => {
+  function checkRouteChange() {
     if (location.pathname === lastPath) return;
     lastPath = location.pathname;
     handleNavigation();
-  }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  setInterval(checkRouteChange, 500);
 
   window.addEventListener('popstate', () => {
-    if (location.pathname !== lastPath) {
-      lastPath = location.pathname;
-      handleNavigation();
-    }
+    checkRouteChange();
   });
 
   document.readyState === 'loading'

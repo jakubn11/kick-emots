@@ -4,6 +4,75 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.6.15] - 2026-05-01
+
+### Changed
+- Replace the third-party emote picker tab smiley with a green rounded-grid icon using the same button color palette.
+
+## [2.6.14] - 2026-05-01
+
+### Changed
+- Restyle the third-party emote picker tab icon as a green circular emote face, matching the visual language of the **Load more** button.
+
+## [2.6.13] - 2026-05-01
+
+### Changed
+- Place each emote picker **Load more** button inline next to its `Showing X of Y` progress text.
+
+## [2.6.12] - 2026-05-01
+
+### Fixed
+- Center the **Load more** plus icon by drawing it with CSS instead of relying on the font `+` glyph.
+
+## [2.6.11] - 2026-05-01
+
+### Fixed
+- Polish the emote picker **Load more** button styling so it reads as a compact action instead of a large plain rectangle.
+- Fit the third-party picker content to the visible native picker viewport and add more bottom padding, preventing the last row of emotes from being clipped.
+
+## [2.6.10] - 2026-05-01
+
+### Changed
+- Keep the emote picker **Load more** button label static and update the `Showing X of Y` progress text after each batch loads.
+
+## [2.6.9] - 2026-05-01
+
+### Added
+- Add a **Load more** button to each emote picker provider section. The picker still starts with 80 emotes per provider for performance, then appends the next batch on demand.
+
+## [2.6.8] - 2026-05-01
+
+### Fixed
+- Reverted the virtualized picker layer and static thumbnail preview path because it could interfere with Kick chat scrolling/input on some picker DOM layouts.
+- Stop locking or scrolling Kick's native picker/container elements from the third-party picker. The custom tab now uses its own bounded scroll area instead of modifying parent scroll state.
+- Keep animated emotes animated in the picker again.
+- Cap picker rendering to 80 matches per provider, with search filtering across the full loaded emote set, to avoid recreating the full page-wide lag.
+
+## [2.6.7] - 2026-05-01
+
+### Fixed
+- Replace the emote picker's full-DOM rendering with a virtualized row renderer. The picker now keeps only the visible rows plus a small buffer in the DOM, preventing hundreds of live emote buttons/images from slowing the whole Kick page.
+- Keep provider cache entries in memory after the first load during a page session, avoiding repeated synchronous `localStorage` JSON parsing on every SPA channel switch.
+- Defer provider cache writes to idle time so fresh API responses do not synchronously serialize large emote arrays during channel initialization.
+- Process already-visible chat messages in small idle chunks after emotes load, reducing page stalls when a channel finishes initializing.
+- Replace the body-wide SPA route `MutationObserver` with a lightweight path poll plus `popstate`, so Kick's own DOM churn no longer wakes the route detector on every page mutation.
+- Use static low-priority thumbnails in the picker for animated BTTV/7TV emotes where available, reducing GIF decode pressure while browsing.
+
+## [2.6.6] - 2026-05-01
+
+### Fixed
+- Refresh the third-party picker when emote data finishes loading, even if the picker was already injected for the current channel. This prevents the picker from getting stuck in its loading/empty state after SPA channel switches.
+- Load picker images only when their buttons enter the picker viewport. This avoids starting hundreds of CDN image/GIF requests at once when opening the picker after changing channels, reducing Safari page-wide lag and failed image loads.
+- Restore reserved height for pending provider sections so off-screen providers remain truly lazy instead of intersecting immediately at zero height.
+- Reset picker scroll position only when replacing picker content instead of on every active-state pass.
+
+## [2.6.5] - 2026-05-01
+
+### Fixed
+- Prevent stale provider loads from previous channels from writing into the active emote map after SPA navigation. This keeps channel-specific emotes from getting mixed or stuck after switching channels.
+- Reduce emote picker lag by ignoring DOM mutations created inside Kick's native picker and the injected third-party picker, instead of scanning every emote button as if it might be a chat message.
+- Disconnect stale autocomplete observers and picker lazy-load observers during navigation/reset so repeated channel switches do not leave extra observers behind.
+
 ## [2.6.4] - 2026-05-01
 
 ### Performance

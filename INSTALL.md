@@ -36,8 +36,9 @@ Alternatively, click the Userscripts icon while on any page and use
   the emote image.  
 - Hover over an emote to see its name and which service it came from.  
 - Open Kick's emote picker and choose the **7TV+** tab to browse/search loaded
-  third-party emotes; clicking one inserts its text code into chat. The emote
-  list scrolls independently, like Kick's native picker tabs.
+  third-party emotes; clicking one inserts its text code into chat. The picker
+  starts with 80 matches per provider for performance, offers **Load more** per
+  provider, and search narrows across all loaded emotes.
 - Navigating between channels reloads the channel-specific emote sets automatically.
 
 ## Updating

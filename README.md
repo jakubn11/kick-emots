@@ -50,7 +50,7 @@ Open any Kick channel. Emotes load automatically and replace matching words in c
 | Tab | Insert selected emote (auto-inserts if only one match) |
 | Esc | Close autocomplete |
 
-**Emote picker:** open Kick's native emote picker and choose the **7TV+** tab to browse or search all loaded third-party emotes. Clicking an emote inserts its code into the chat input.
+**Emote picker:** open Kick's native emote picker and choose the **7TV+** tab to browse animated third-party emotes. The picker starts with 80 matches per provider for performance, then offers **Load more** per provider. Search narrows across all loaded emotes. Clicking an emote inserts its code into the chat input.
 
 ## Troubleshooting
 
