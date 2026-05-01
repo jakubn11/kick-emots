@@ -153,6 +153,13 @@ Keep docs oriented around Safari and the Userscripts extension unless support fo
 
 Before committing any change, always:
 
-1. **Bump `@version`** in the `kick-emotes.user.js` metadata header (patch for fixes/tweaks, minor for new features).
+1. **Bump `@version`** in the `kick-emotes.user.js` metadata header using these rules:
+
+   | Change | Bump | Example |
+   |---|---|---|
+   | New user-facing feature — new provider, new UI component, new keyboard shortcut | **minor** `x.+1.0` | `2.6.x → 2.7.0` |
+   | Bug fix, style tweak, refactor, internal change | **patch** `x.x.+1` | `2.6.x → 2.6.x+1` |
+   | Breaking change or full rewrite | **major** `+1.0.0` | `2.x.x → 3.0.0` |
+
 2. **Update `CHANGELOG.md`** — add an entry under the new version with a short summary of what changed.
 3. **Update `README.md`** if the change is user-facing: new or removed features, changed behaviour, new keyboard shortcuts, provider changes, or updated troubleshooting steps. Internal refactors and bug fixes that don't change user-facing behaviour do not require a README update.
