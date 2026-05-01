@@ -1,14 +1,15 @@
-<p align="center">
-  <img src="icon.svg" width="96" height="96" alt="Kick Third-Party Emotes icon">
+<div align="center">
+
+<img src="icon.svg" width="108" height="108" alt="Kick Third-Party Emotes">
+
+<h1>Kick Third-Party Emotes</h1>
+
+<p>
+  BetterTTV, 7TV, and FrankerFaceZ emotes directly in Kick.com chat.<br>
+  Animated GIFs · Zero-width overlays · Autocomplete · Native emote picker tab.
 </p>
 
-<h1 align="center">Kick Third-Party Emotes</h1>
-
-<p align="center">
-  <strong>Safari userscript that adds BetterTTV, 7TV, and FrankerFaceZ emotes to Kick.com chat.</strong>
-</p>
-
-<p align="center">
+<p>
   <img alt="Safari userscript" src="https://img.shields.io/badge/Safari-Userscript-22c55e?style=flat-square&logo=safari&logoColor=fff&labelColor=101013">
   &nbsp;
   <img alt="Providers" src="https://img.shields.io/badge/Providers-BTTV%20%C2%B7%207TV%20%C2%B7%20FFZ-22c55e?style=flat-square&labelColor=101013">
@@ -17,6 +18,8 @@
   &nbsp;
   <img alt="Autocomplete" src="https://img.shields.io/badge/Tab-Autocomplete-22c55e?style=flat-square&labelColor=101013">
 </p>
+
+</div>
 
 ## Features
 
