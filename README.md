@@ -47,10 +47,14 @@ The script works with any userscript manager (Tampermonkey, Violentmonkey, Greas
 
 See [INSTALL.md](INSTALL.md) for step-by-step instructions.
 
-Short version:
-1. Install the **Userscripts** Safari extension from the Mac App Store
+**Safari (recommended):**
+1. Install the **[Userscripts](https://apps.apple.com/app/userscripts/id1463298887)** extension from the Mac App Store
 2. Configure a scripts folder in the extension settings
 3. Copy `kick-emotes.user.js` into that folder
+
+**Other browsers (untested):**
+1. Install [Tampermonkey](https://www.tampermonkey.net) or [Violentmonkey](https://violentmonkey.github.io)
+2. Open `kick-emotes.user.js` and paste it into a new script, or drag the file into the extension dashboard
 
 ## Providers
 
@@ -80,9 +84,9 @@ Open any Kick channel. Emotes load automatically and replace matching words in c
 
 | Symptom | Fix |
 |---------|-----|
-| No emotes appear | Open Safari DevTools → Console and look for `[KickEmotes]` log lines. If absent, check that the Userscripts extension is enabled for kick.com. |
+| No emotes appear | Open your browser's DevTools → Console and look for `[KickEmotes]` log lines. If absent, check that your userscript extension is enabled for kick.com. |
 | Only global emotes load | The streamer may not have BTTV/7TV/FFZ configured for their channel. |
-| Emotes stop working after a Kick update | Kick may have changed their chat DOM selectors. Open an issue with the relevant class names from Safari Inspector. |
+| Emotes stop working after a Kick update | Kick may have changed their chat DOM selectors. Open an issue with the relevant class names from the browser inspector. |
 | Stale emotes after a script update | Clear the cache: `Object.keys(localStorage).filter(k => k.startsWith('kte_')).forEach(k => localStorage.removeItem(k))` |
 
 ## License
