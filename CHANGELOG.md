@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.6.25] - 2026-05-03
+
+### Fixed
+- Fix emotes not rendering in recycled virtual-list chat messages (reprocess after `data-index` change).
+- Start chat observer before emote loading completes so messages arriving during init aren't missed.
+- Retry failed provider API calls after 5 seconds instead of silently dropping them.
+
 ## [2.6.24] - 2026-05-02
 
 ### Changed

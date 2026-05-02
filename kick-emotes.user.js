@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.24
+// @version      2.6.25
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -1300,6 +1300,10 @@
           mut.target.querySelectorAll?.('[data-kte-done]').forEach(el => {
             delete el.dataset.kteDone;
           });
+          for (const sel of MSG_SELECTORS) {
+            if (mut.target.matches?.(sel)) processMessageEl(mut.target);
+            mut.target.querySelectorAll?.(sel).forEach(processMessageEl);
+          }
         }
         for (const added of mut.addedNodes) {
           if (added.nodeType !== Node.ELEMENT_NODE) continue;
@@ -1350,12 +1354,16 @@
     acHide();
     hideTooltip();
     resetPicker();
+    startChatObserver();
     console.log(`${TAG} Loading emotes for /${channelSlug}…`);
 
-    const globalResults = await Promise.allSettled([loadBTTVGlobal(), load7TVGlobal(), loadFFZGlobal()]);
+    const globalLoaders = [loadBTTVGlobal, load7TVGlobal, loadFFZGlobal];
+    const channelLoaders = [() => loadBTTVChannel(slug), () => load7TVChannel(slug), () => loadFFZChannel(slug)];
+
+    const globalResults = await Promise.allSettled(globalLoaders.map(fn => fn()));
     if (seq !== initSeq || currentChannelSlug() !== slug) return;
 
-    const channelResults = await Promise.allSettled([loadBTTVChannel(slug), load7TVChannel(slug), loadFFZChannel(slug)]);
+    const channelResults = await Promise.allSettled(channelLoaders.map(fn => fn()));
     if (seq !== initSeq || currentChannelSlug() !== slug) return;
 
     emoteMap.clear();
@@ -1363,12 +1371,38 @@
     applyLoadResults(channelResults);
     emoteVersion++;
 
+    const failedGlobal = globalLoaders.filter((_, i) => globalResults[i].status === 'rejected');
+    const failedChannel = channelLoaders.filter((_, i) => channelResults[i].status === 'rejected');
+
     console.log(`${TAG} Ready – ${emoteMap.size} emotes for /${channelSlug}`);
 
-    startChatObserver();
     processAllVisible();
     waitForInput();
     queuePickerInject();
+
+    if (failedGlobal.length || failedChannel.length) {
+      const retryCount = failedGlobal.length + failedChannel.length;
+      console.log(`${TAG} ${retryCount} provider(s) failed, retrying in 5s…`);
+      setTimeout(async () => {
+        if (seq !== initSeq || currentChannelSlug() !== slug) return;
+        const retryResults = await Promise.allSettled([
+          ...failedGlobal.map(fn => fn()),
+          ...failedChannel.map(fn => fn()),
+        ]);
+        if (seq !== initSeq || currentChannelSlug() !== slug) return;
+        let added = 0;
+        for (const r of retryResults) {
+          if (r.status !== 'fulfilled' || !Array.isArray(r.value)) continue;
+          for (const [code, e] of r.value) { emoteMap.set(code, e); added++; }
+        }
+        if (added) {
+          emoteVersion++;
+          console.log(`${TAG} Retry loaded ${added} emotes`);
+          document.querySelectorAll('[data-kte-done]').forEach(el => { delete el.dataset.kteDone; });
+          processAllVisible();
+        }
+      }, 5000);
+    }
   }
 
   // ─── SPA Routing ──────────────────────────────────────────────────────────
