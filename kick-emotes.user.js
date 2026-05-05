@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.25
+// @version      2.6.26
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -156,6 +156,8 @@
       border-left: 3px solid #22c55e;
       box-shadow: 0 8px 24px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06);
       backdrop-filter: blur(8px);
+      align-items: center;
+      gap: 6px;
     }
 
     /* Autocomplete popup */
@@ -213,10 +215,23 @@
       flex-shrink: 0;
       opacity: .85;
     }
-    .kte-ac-src-7tv  { color: #4da6ff; }
-    .kte-ac-src-bttv { color: #ff6b6b; }
-    .kte-ac-src-ffz  { color: #c084fc; }
-    .kte-ac-src-other { color: #22c55e; }
+    .kte-src-7tv  { color: #4da6ff; }
+    .kte-src-bttv { color: #ff6b6b; }
+    .kte-src-ffz  { color: #c084fc; }
+    .kte-src-other { color: #22c55e; }
+
+    .kte-tip-code {
+      color: #fff;
+    }
+    .kte-tip-sep {
+      color: rgba(255,255,255,.25);
+      font-weight: 600;
+    }
+    .kte-tip-source {
+      font-size: 10px;
+      font-weight: 700;
+      opacity: .85;
+    }
     #kte-ac-footer {
       font-size: 10px;
       font-weight: 600;
@@ -347,6 +362,21 @@
     return typeof requestIdleCallback === 'function'
       ? requestIdleCallback(cb, { timeout: 300 })
       : setTimeout(cb, 16);
+  }
+
+  function sourceName(source) {
+    return (source ?? '').split(' ')[0] || 'Other';
+  }
+
+  function sourceClass(source) {
+    const name = sourceName(source);
+    return { '7TV': 'kte-src-7tv', BTTV: 'kte-src-bttv', FFZ: 'kte-src-ffz' }[name] ?? 'kte-src-other';
+  }
+
+  function setEmoteTooltip(el, code, source) {
+    el.dataset.kteTip = `${code}  ·  ${source}`;
+    el.dataset.kteTipCode = code;
+    el.dataset.kteTipSource = source;
   }
 
   // ─── HTTP ─────────────────────────────────────────────────────────────────
@@ -571,8 +601,29 @@
       document.body.appendChild(tipEl);
     }
 
-    tipEl.textContent = text;
-    tipEl.style.display = 'block';
+    tipEl.textContent = '';
+
+    const code = wrap.dataset.kteTipCode;
+    const source = wrap.dataset.kteTipSource;
+    if (code && source) {
+      const codeEl = document.createElement('span');
+      codeEl.className = 'kte-tip-code';
+      codeEl.textContent = code;
+
+      const sepEl = document.createElement('span');
+      sepEl.className = 'kte-tip-sep';
+      sepEl.textContent = '·';
+
+      const sourceEl = document.createElement('span');
+      sourceEl.className = `kte-tip-source ${sourceClass(source)}`;
+      sourceEl.textContent = source;
+
+      tipEl.append(codeEl, sepEl, sourceEl);
+    } else {
+      tipEl.textContent = text;
+    }
+
+    tipEl.style.display = 'inline-flex';
 
     const rect = wrap.getBoundingClientRect();
     const tipRect = tipEl.getBoundingClientRect();
@@ -585,7 +636,7 @@
   function makeEmoteWrap(code, emote) {
     const wrap = document.createElement('span');
     wrap.className = 'kte-wrap';
-    wrap.dataset.kteTip = `${code}  ·  ${emote.source}`;
+    setEmoteTooltip(wrap, code, emote.source);
     wrap.addEventListener('mouseenter', () => showTooltip(wrap));
     wrap.addEventListener('mouseleave', hideTooltip);
 
@@ -799,9 +850,8 @@
       nameEl.textContent = code;
 
       const srcEl = document.createElement('span');
-      const srcName = emote.source.split(' ')[0];
-      const srcClass = { '7TV': 'kte-ac-src-7tv', 'BTTV': 'kte-ac-src-bttv', 'FFZ': 'kte-ac-src-ffz' }[srcName] ?? 'kte-ac-src-other';
-      srcEl.className = `kte-ac-src ${srcClass}`;
+      const srcName = sourceName(emote.source);
+      srcEl.className = `kte-ac-src ${sourceClass(emote.source)}`;
       srcEl.textContent = srcName;
 
       row.append(img, nameEl, srcEl);
@@ -879,7 +929,7 @@
     btn.className = 'kte-picker-btn';
     btn.setAttribute('aria-label', `Insert ${code}`);
     btn.dataset.code = code;
-    btn.dataset.kteTip = `${code}  ·  ${emote.source}`;
+    setEmoteTooltip(btn, code, emote.source);
     btn.addEventListener('mouseenter', () => showTooltip(btn));
     btn.addEventListener('mouseleave', hideTooltip);
 
@@ -960,7 +1010,7 @@
     const groups = new Map();
     for (const [code, emote] of emoteMap) {
       if (lower && !code.toLowerCase().includes(lower)) continue;
-      const source = emote.source.split(' ')[0];
+      const source = sourceName(emote.source);
       if (!groups.has(source)) groups.set(source, []);
       groups.get(source).push({ code, emote });
     }
@@ -1196,7 +1246,9 @@
     const tab = document.createElement('button');
     tab.id = 'kte-picker-tab';
     tab.type = 'button';
-    tab.title = '7TV / BTTV / FFZ emotes';
+    tab.dataset.kteTip = '7TV / BTTV / FFZ emotes';
+    tab.addEventListener('mouseenter', () => showTooltip(tab));
+    tab.addEventListener('mouseleave', hideTooltip);
     tab.setAttribute('aria-label', 'Third-party emotes');
     tab.setAttribute('data-active', 'false');
     if (nativeTab) tab.className = nativeTab.className;

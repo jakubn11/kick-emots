@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.6.26] - 2026-05-05
+
+### Changed
+- Match chat emote tooltip provider colors to the autocomplete popup: 7TV in blue, BTTV in red, FFZ in purple.
+
 ## [2.6.25] - 2026-05-03
 
 ### Fixed
