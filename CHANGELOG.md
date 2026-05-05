@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.37] - 2026-05-05
+
+### Fixed
+- Prevent picker lag after loading hundreds of emotes by only keeping thumbnail image URLs assigned near the visible picker viewport.
+- Delegate picker thumbnail hover handlers at the grid level instead of adding listeners to every emote button.
+
 ## [2.6.36] - 2026-05-05
 
 ### Fixed

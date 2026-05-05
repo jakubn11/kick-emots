@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.36
+// @version      2.6.37
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -994,6 +994,8 @@
   const PICKER_INJECT_DELAY = 120;
   const PICKER_IMAGE_LOAD_CHUNK = 6;
   const PICKER_IMAGE_LOAD_DELAY = 50;
+  const PICKER_IMAGE_VIEWPORT_BUFFER = 180;
+  const PICKER_IMAGE_UNLOAD_BUFFER = 700;
 
   function pickerBuildButton(code, emote) {
     const btn = document.createElement('button');
@@ -1002,8 +1004,6 @@
     btn.setAttribute('aria-label', `Insert ${code}`);
     btn.dataset.code = code;
     setEmoteTooltip(btn, code, emote.source);
-    btn.addEventListener('mouseenter', () => showTooltip(btn));
-    btn.addEventListener('mouseleave', hideTooltip);
 
     const url = safeUrl(emote.url);
     if (!url) return null;
@@ -1059,15 +1059,92 @@
     requestAnimationFrame(step);
   }
 
-  function pickerQueuePendingImages(content) {
-    if (!content) return;
-    const pending = [...content.querySelectorAll('img[data-kte-src]:not([data-kte-loaded="1"]):not([data-kte-queued="1"])')];
+  function pickerFindImageViewport(content) {
+    const panel = content?.closest?.('#chat-emotes-picker-panel');
+    let el = content?.parentElement;
+    while (el && el !== panel) {
+      const className = typeof el.className === 'string' ? el.className : '';
+      const overflowY = getComputedStyle(el).overflowY;
+      if (className.includes('overflow-y-auto') || className.includes('overflow-y-scroll') || /auto|scroll/.test(overflowY)) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+    return panel ?? content;
+  }
+
+  function pickerQueueVisibleImages(content, viewport = pickerFindImageViewport(content)) {
+    if (!content || content.hidden) return;
+    const viewportRect = viewport?.getBoundingClientRect?.() ?? { top: 0, bottom: window.innerHeight };
+    const top = viewportRect.top - PICKER_IMAGE_VIEWPORT_BUFFER;
+    const bottom = viewportRect.bottom + PICKER_IMAGE_VIEWPORT_BUFFER;
+    const unloadTop = viewportRect.top - PICKER_IMAGE_UNLOAD_BUFFER;
+    const unloadBottom = viewportRect.bottom + PICKER_IMAGE_UNLOAD_BUFFER;
+
+    if (content._kteImageQueue?.length) {
+      content._kteImageQueue = content._kteImageQueue.filter(img => {
+        const rect = (img.parentElement ?? img).getBoundingClientRect();
+        const keep = img.isConnected && rect.bottom >= top && rect.top <= bottom;
+        if (!keep) delete img.dataset.kteQueued;
+        return keep;
+      });
+    }
+
+    content.querySelectorAll('img[data-kte-loaded="1"]').forEach(img => {
+      const rect = (img.parentElement ?? img).getBoundingClientRect();
+      if (rect.bottom >= unloadTop && rect.top <= unloadBottom) return;
+      img.removeAttribute('src');
+      delete img.dataset.kteLoaded;
+      delete img.dataset.kteQueued;
+      delete img._kteRetry;
+    });
+
+    const pending = [...content.querySelectorAll('img[data-kte-src]:not([data-kte-loaded="1"]):not([data-kte-queued="1"])')]
+      .filter(img => {
+        const rect = (img.parentElement ?? img).getBoundingClientRect();
+        return rect.bottom >= top && rect.top <= bottom;
+      });
     if (!content._kteImageQueue) content._kteImageQueue = [];
     for (const img of pending) {
       img.dataset.kteQueued = '1';
       content._kteImageQueue.push(img);
     }
     pickerPumpImageQueue(content);
+  }
+
+  function pickerDetachImageLoader(content) {
+    if (!content) return;
+    if (content._kteImageScrollTarget && content._kteImageScrollHandler) {
+      content._kteImageScrollTarget.removeEventListener('scroll', content._kteImageScrollHandler);
+      window.removeEventListener('resize', content._kteImageScrollHandler);
+    }
+    if (content._kteImageFrame) cancelAnimationFrame(content._kteImageFrame);
+    content._kteImageScrollTarget = null;
+    content._kteImageScrollHandler = null;
+    content._kteImageFrame = null;
+  }
+
+  function pickerAttachImageLoader(content, viewport = pickerFindImageViewport(content)) {
+    if (!content || !viewport) return;
+    if (content._kteImageScrollTarget === viewport && content._kteImageScrollHandler) {
+      pickerQueueVisibleImages(content, viewport);
+      return;
+    }
+
+    pickerDetachImageLoader(content);
+    const schedule = () => {
+      if (content._kteImageFrame) return;
+      content._kteImageFrame = requestAnimationFrame(() => {
+        content._kteImageFrame = null;
+        pickerQueueVisibleImages(content, viewport);
+      });
+    };
+
+    content._kteImageScrollTarget = viewport;
+    content._kteImageScrollHandler = schedule;
+    viewport.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule, { passive: true });
+    schedule();
   }
 
   function pickerAppendButtons(grid, emotes, start, end) {
@@ -1082,6 +1159,7 @@
 
   function pickerMarkContentStale(content) {
     if (content) {
+      pickerDetachImageLoader(content);
       content.dataset.kteStale = '1';
       content._kteImageQueue = [];
       content._kteImageLoading = false;
@@ -1103,7 +1181,8 @@
       pickerAppendButtons(grid, emotes, shown, next);
       shown = next;
       limitEl.textContent = `Showing ${shown} of ${emotes.length}`;
-      pickerQueuePendingImages(grid.closest('#kte-picker-content'));
+      const content = grid.closest('#kte-picker-content');
+      pickerQueueVisibleImages(content, content?._kteImageScrollTarget);
       if (shown >= emotes.length) {
         more.remove();
       } else {
@@ -1179,6 +1258,14 @@
       const grid = document.createElement('div');
       grid.className = 'kte-picker-grid';
       grid.addEventListener('mousedown', e => { if (e.target.closest('.kte-picker-btn')) e.preventDefault(); });
+      grid.addEventListener('mouseover', e => {
+        const b = e.target.closest('.kte-picker-btn');
+        if (b && grid.contains(b)) showTooltip(b);
+      });
+      grid.addEventListener('mouseout', e => {
+        const b = e.target.closest('.kte-picker-btn');
+        if (b && !b.contains(e.relatedTarget)) hideTooltip();
+      });
       grid.addEventListener('click', e => {
         const b = e.target.closest('.kte-picker-btn');
         if (b?.dataset.code) pickerInsert(b.dataset.code);
@@ -1304,7 +1391,7 @@
 
     if (!content.hidden) {
       content.scrollTop = 0;
-      pickerQueuePendingImages(content);
+      pickerAttachImageLoader(content, parts.scrollViewport);
     }
     return content;
   }
@@ -1325,8 +1412,9 @@
       content.hidden = !active;
       if (!active) {
         content.style.height = '';
+        pickerDetachImageLoader(content);
       } else {
-        pickerQueuePendingImages(content);
+        pickerAttachImageLoader(content, parts.scrollViewport);
       }
     }
     for (const child of pickerNativeViews(parts, content)) {
