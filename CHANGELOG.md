@@ -2,7 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.6.35] - 2026-05-05
+
+### Fixed
+- Coalesce picker refreshes after stream navigation and avoid building/loading the third-party picker content while its tab is inactive.
+- Reserve hidden thumbnail slots before picker images load, preventing unloaded image fallback boxes and layout churn.
+
+## [2.6.34] - 2026-05-05
+
+### Fixed
+- Make picker thumbnails fill promptly again while still pacing image URL assignment to avoid large decode spikes.
+
+## [2.6.33] - 2026-05-05
+
+### Fixed
+- Lazy-load picker thumbnails with a manual scroll check so off-screen emote images do not all decode at once after switching streams.
+
+## [2.6.32] - 2026-05-05
+
+### Fixed
+- Reduce page lag when loading more picker emotes after switching streams by appending extra picker batches in small idle chunks and cancelling stale batches after picker rebuilds.
 
 ## [2.6.31] - 2026-05-05
 

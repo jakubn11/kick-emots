@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.31
+// @version      2.6.35
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -99,6 +99,7 @@
   let initSeq = 0;
   let emoteVersion = 0;
   let pickerInjectQueued = false;
+  let pickerInjectTimer = null;
   let lastPath = location.pathname;
 
   let acDropdown = null;
@@ -288,6 +289,15 @@
       object-fit: contain;
       pointer-events: none;
     }
+    .kte-picker-btn img[data-kte-src] {
+      width: 32px;
+      height: 32px;
+      object-fit: contain;
+      visibility: hidden;
+    }
+    .kte-picker-btn img[data-kte-loaded="1"] {
+      visibility: visible;
+    }
     .kte-picker-empty {
       color: #71717a;
       font-size: 12px;
@@ -343,6 +353,10 @@
       border-color: rgba(34, 197, 94, .85);
       color: #f0fdf4;
       outline: none;
+    }
+    .kte-picker-more:disabled {
+      cursor: progress;
+      opacity: .68;
     }
   `;
   (document.head ?? document.documentElement).appendChild(_style);
@@ -943,6 +957,9 @@
   // ─── Emote Picker ─────────────────────────────────────────────────────────
 
   const PICKER_PROVIDER_LIMIT = 80;
+  const PICKER_INJECT_DELAY = 120;
+  const PICKER_IMAGE_LOAD_CHUNK = 12;
+  const PICKER_IMAGE_LOAD_DELAY = 20;
 
   function pickerBuildButton(code, emote) {
     const btn = document.createElement('button');
@@ -957,18 +974,66 @@
     const url = safeUrl(emote.url);
     if (!url) return null;
     const img = document.createElement('img');
-    img.src = url;
     img.alt = code;
     img.draggable = false;
     img.decoding = 'async';
+    img.setAttribute('fetchpriority', 'low');
+    img.dataset.kteSrc = url;
     img.addEventListener('error', () => {
       if (img._kteRetry) return;
       img._kteRetry = true;
-      setTimeout(() => { img.src = url; }, 2000);
+      setTimeout(() => {
+        const retryUrl = safeUrl(img.dataset.kteSrc ?? '');
+        if (retryUrl && img.dataset.kteLoaded === '1') img.src = retryUrl;
+      }, 2000);
     });
     btn.appendChild(img);
 
     return btn;
+  }
+
+  function pickerLoadImage(img) {
+    if (img.dataset.kteLoaded === '1') return;
+    const url = safeUrl(img.dataset.kteSrc ?? '');
+    if (!url) return;
+    img.dataset.kteLoaded = '1';
+    img.src = url;
+  }
+
+  function pickerPumpImageQueue(content) {
+    if (!content || content._kteImageLoading || !content._kteImageQueue?.length) return;
+    content._kteImageLoading = true;
+
+    function step() {
+      if (!content.isConnected || content.dataset.kteStale === '1') {
+        content._kteImageQueue = [];
+        content._kteImageLoading = false;
+        return;
+      }
+      if (content.hidden) {
+        content._kteImageLoading = false;
+        return;
+      }
+
+      const batch = content._kteImageQueue.splice(0, PICKER_IMAGE_LOAD_CHUNK);
+      batch.forEach(pickerLoadImage);
+
+      if (content._kteImageQueue.length) setTimeout(step, PICKER_IMAGE_LOAD_DELAY);
+      else content._kteImageLoading = false;
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  function pickerQueuePendingImages(content) {
+    if (!content) return;
+    const pending = [...content.querySelectorAll('img[data-kte-src]:not([data-kte-loaded="1"]):not([data-kte-queued="1"])')];
+    if (!content._kteImageQueue) content._kteImageQueue = [];
+    for (const img of pending) {
+      img.dataset.kteQueued = '1';
+      content._kteImageQueue.push(img);
+    }
+    pickerPumpImageQueue(content);
   }
 
   function pickerAppendButtons(grid, emotes, start, end) {
@@ -981,6 +1046,14 @@
     grid.appendChild(frag);
   }
 
+  function pickerMarkContentStale(content) {
+    if (content) {
+      content.dataset.kteStale = '1';
+      content._kteImageQueue = [];
+      content._kteImageLoading = false;
+    }
+  }
+
   function pickerBuildLoadMore(grid, emotes, shown, limitEl) {
     const more = document.createElement('button');
     more.type = 'button';
@@ -991,10 +1064,18 @@
     more.addEventListener('mousedown', e => e.preventDefault());
     more.addEventListener('click', () => {
       const next = Math.min(shown + PICKER_PROVIDER_LIMIT, emotes.length);
+      more.disabled = true;
+      more.textContent = 'Loading...';
       pickerAppendButtons(grid, emotes, shown, next);
       shown = next;
       limitEl.textContent = `Showing ${shown} of ${emotes.length}`;
-      if (shown >= emotes.length) more.remove();
+      pickerQueuePendingImages(grid.closest('#kte-picker-content'));
+      if (shown >= emotes.length) {
+        more.remove();
+      } else {
+        more.disabled = false;
+        more.textContent = 'Load more';
+      }
     });
 
     return more;
@@ -1025,7 +1106,7 @@
     }
   }
 
-function pickerBuildContent(query) {
+  function pickerBuildContent(query) {
     const wrap = document.createElement('div');
     wrap.id = 'kte-picker-content';
     const sectionsContainer = document.createElement('div');
@@ -1181,13 +1262,21 @@ function pickerBuildContent(query) {
     content.dataset.kteEmoteVersion = String(emoteVersion);
     content.hidden = !active;
 
-    if (oldContent) oldContent.replaceWith(content);
+    if (oldContent) {
+      pickerMarkContentStale(oldContent);
+      oldContent.replaceWith(content);
+    }
     else parts.mainGrid.appendChild(content);
 
     if (!content.hidden) {
       content.scrollTop = 0;
+      pickerQueuePendingImages(content);
     }
     return content;
+  }
+
+  function pickerIsActive(panel) {
+    return panel.querySelector('#kte-picker-tab')?.getAttribute('data-active') === 'true';
   }
 
   function pickerApplyActiveState(panel) {
@@ -1202,6 +1291,8 @@ function pickerBuildContent(query) {
       content.hidden = !active;
       if (!active) {
         content.style.height = '';
+      } else {
+        pickerQueuePendingImages(content);
       }
     }
     for (const child of pickerNativeViews(parts, content)) {
@@ -1322,10 +1413,16 @@ function pickerBuildContent(query) {
     if (tab.parentElement !== parts.tabsRow) parts.tabsRow.appendChild(tab);
 
     const content = panel.querySelector('#kte-picker-content');
-    if (!content
-      || content.dataset.kteChannel !== (channelSlug ?? '')
-      || content.dataset.kteEmoteVersion !== String(emoteVersion)) {
+    const active = pickerIsActive(panel);
+    const stale = content
+      && (content.dataset.kteChannel !== (channelSlug ?? '')
+        || content.dataset.kteEmoteVersion !== String(emoteVersion));
+
+    if (active && (!content || stale)) {
       pickerRefreshContent(panel);
+    } else if (!active && stale) {
+      pickerMarkContentStale(content);
+      content.remove();
     }
     pickerAttachSearch(panel, parts.searchInput);
     pickerAttachNativeTabs(panel, parts.tabsRow);
@@ -1339,19 +1436,26 @@ function pickerBuildContent(query) {
   }
 
   function queuePickerInject(panel) {
-    if (pickerInjectQueued) return;
+    if (pickerInjectTimer) clearTimeout(pickerInjectTimer);
     pickerInjectQueued = true;
     const seq = initSeq;
-    requestAnimationFrame(() => {
-      pickerInjectQueued = false;
-      if (seq !== initSeq) return;
-      const target = panel?.isConnected ? panel : document.getElementById('chat-emotes-picker-panel');
-      if (target) pickerInject(target);
-    });
+    pickerInjectTimer = setTimeout(() => {
+      pickerInjectTimer = null;
+      requestAnimationFrame(() => {
+        pickerInjectQueued = false;
+        if (seq !== initSeq) return;
+        const target = panel?.isConnected ? panel : document.getElementById('chat-emotes-picker-panel');
+        if (target) pickerInject(target);
+      });
+    }, PICKER_INJECT_DELAY);
   }
 
   function resetPicker() {
     pickerInjectQueued = false;
+    if (pickerInjectTimer) {
+      clearTimeout(pickerInjectTimer);
+      pickerInjectTimer = null;
+    }
 
     const panel = document.getElementById('chat-emotes-picker-panel');
     if (!panel) return;
@@ -1362,7 +1466,9 @@ function pickerBuildContent(query) {
       delete child.dataset.kteNativeHidden;
     });
     panel.querySelector('#kte-picker-tab')?.remove();
-    panel.querySelector('#kte-picker-content')?.remove();
+    const content = panel.querySelector('#kte-picker-content');
+    pickerMarkContentStale(content);
+    content?.remove();
   }
 
   // ─── Chat Observer ────────────────────────────────────────────────────────
