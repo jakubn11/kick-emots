@@ -124,6 +124,7 @@
   let initSeq = 0;
   let emoteVersion = 0;
   let visibleRefreshQueued = false;
+  let visibleRefreshTimer = null;
   let pickerInjectQueued = false;
   let pickerInjectTimer = null;
   let messageProcessQueue = [];
@@ -836,8 +837,9 @@
   }
 
   function processMessageEl(el) {
-    if (el.dataset.kteDone) return;
-    el.dataset.kteDone = '1';
+    const version = String(emoteVersion);
+    if (el.dataset.kteVersion === version) return;
+    el.dataset.kteVersion = version;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
@@ -871,23 +873,19 @@
     RIC(step);
   }
 
-  function clearProcessedMessageMarks() {
-    document.querySelectorAll('[data-kte-done]').forEach(el => {
-      delete el.dataset.kteDone;
-    });
-  }
-
-  function queueVisibleEmoteRefresh() {
-    if (visibleRefreshQueued) return;
+  function queueVisibleEmoteRefresh(delay = 0) {
+    if (visibleRefreshTimer) clearTimeout(visibleRefreshTimer);
     visibleRefreshQueued = true;
 
     const seq = initSeq;
-    RIC(() => {
-      visibleRefreshQueued = false;
-      if (seq !== initSeq) return;
-      clearProcessedMessageMarks();
-      processAllVisible();
-    });
+    visibleRefreshTimer = setTimeout(() => {
+      visibleRefreshTimer = null;
+      RIC(() => {
+        visibleRefreshQueued = false;
+        if (seq !== initSeq) return;
+        processAllVisible();
+      });
+    }, delay);
   }
 
   function processMessageTree(root) {
@@ -1135,6 +1133,7 @@
   const PICKER_INJECT_DELAY = 120;
   const PICKER_ROUTE_INJECT_DELAY = 700;
   const PICKER_APPEND_REFRESH_DELAY = 260;
+  const ROUTE_CHAT_REFRESH_DELAY = 500;
   const PICKER_APPEND_CHUNK = 10;
   const PICKER_APPEND_DELAY = 24;
   const PICKER_IMAGE_LOAD_CHUNK = 4;
@@ -1370,6 +1369,12 @@
   function pickerMarkContentStale(content) {
     if (content) {
       pickerDetachImageLoader(content);
+      content.querySelectorAll('img[data-kte-loaded="1"]').forEach(img => {
+        img.removeAttribute('src');
+        delete img.dataset.kteLoaded;
+        delete img.dataset.kteQueued;
+        delete img._kteRetry;
+      });
       content.dataset.kteStale = '1';
       content._kteImageQueue = [];
       content._kteImageLoading = false;
@@ -1830,8 +1835,9 @@
         // Virtual list recycles elements by changing data-index — clear stale marks
         // so the recycled message container gets reprocessed with its new content.
         if (mut.type === 'attributes' && mut.attributeName === 'data-index') {
-          mut.target.querySelectorAll?.('[data-kte-done]').forEach(el => {
-            delete el.dataset.kteDone;
+          delete mut.target.dataset.kteVersion;
+          mut.target.querySelectorAll?.('[data-kte-version]').forEach(el => {
+            delete el.dataset.kteVersion;
           });
           queueProcessMessageTree(mut.target);
         }
@@ -1872,6 +1878,12 @@
     return Date.now() - lastNavigationAt < 2500
       ? PICKER_ROUTE_INJECT_DELAY
       : PICKER_INJECT_DELAY;
+  }
+
+  function routeChatRefreshDelay() {
+    return Date.now() - lastNavigationAt < 2500
+      ? ROUTE_CHAT_REFRESH_DELAY
+      : 0;
   }
 
   async function init() {
@@ -1931,7 +1943,7 @@
       loadedProviders.set(loader.key, entries);
       rebuildEmoteMap();
       emoteVersion++;
-      queueVisibleEmoteRefresh();
+      queueVisibleEmoteRefresh(routeChatRefreshDelay());
       queuePickerInject(null, pickerProviderInjectDelay());
       acRefreshOpen();
       return true;
@@ -1947,7 +1959,7 @@
 
     console.log(`${TAG} Ready – ${emoteMap.size} emotes for /${channelSlug}`);
 
-    queueVisibleEmoteRefresh();
+    queueVisibleEmoteRefresh(routeChatRefreshDelay());
     queuePickerInject(null, pickerProviderInjectDelay());
 
     if (failedLoaders.length) {
@@ -1978,6 +1990,13 @@
     lastNavigationAt = Date.now();
     chatObserver?.disconnect(); chatObserver = null;
     inputObserver?.disconnect(); inputObserver = null;
+    if (visibleRefreshTimer) {
+      clearTimeout(visibleRefreshTimer);
+      visibleRefreshTimer = null;
+    }
+    visibleRefreshQueued = false;
+    messageProcessQueue = [];
+    messageProcessQueued = false;
     emoteMap.clear();
     emoteVersion++;
     acHide();
