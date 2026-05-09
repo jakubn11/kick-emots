@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.40
+// @version      2.6.41
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -1215,6 +1215,13 @@
     return panel ?? content;
   }
 
+  function pickerActiveImageViewport(content, fallback) {
+    if (!content) return fallback;
+    return content.scrollHeight > content.clientHeight + 1
+      ? content
+      : (fallback ?? pickerFindImageViewport(content));
+  }
+
   function pickerQueueVisibleImages(content, viewport = pickerFindImageViewport(content), unloadFarImages = false) {
     if (!content || content.hidden) return;
     const viewportRect = viewport?.getBoundingClientRect?.() ?? { top: 0, bottom: window.innerHeight };
@@ -1272,17 +1279,23 @@
     content._kteImageFrame = null;
     content._kteImageTimer = null;
     content._kteImageUnloadTimer = null;
+    content._kteImageViewportFallback = null;
     content._kteScrollContainValue = undefined;
   }
 
   function pickerAttachImageLoader(content, viewport = pickerFindImageViewport(content)) {
-    if (!content || !viewport) return;
+    if (!content) return;
+    content._kteImageViewportFallback = viewport;
+    viewport = pickerActiveImageViewport(content, viewport);
+    if (!viewport) return;
+
     if (content._kteImageScrollTarget === viewport && content._kteImageScrollHandler) {
       content._kteImageScrollHandler();
       return;
     }
 
     pickerDetachImageLoader(content);
+    content._kteImageViewportFallback = viewport === content ? pickerFindImageViewport(content) : viewport;
     content._kteScrollContainValue = viewport.style.overscrollBehavior;
     viewport.style.overscrollBehavior = 'contain';
 
@@ -1351,7 +1364,7 @@
       shown = next;
       limitEl.textContent = `Showing ${shown} of ${emotes.length}`;
       const content = grid.closest('#kte-picker-content');
-      pickerQueueVisibleImages(content, content?._kteImageScrollTarget);
+      pickerAttachImageLoader(content, content?._kteImageViewportFallback ?? content?._kteImageScrollTarget);
       if (shown >= emotes.length) {
         more.remove();
       } else {
