@@ -562,26 +562,16 @@
     return fetchAndCache(key, fetcher);
   }
 
-  function mergeEmoteEntries(entries) {
+  function mergeEmoteEntries(entries, isChannel) {
     if (!Array.isArray(entries) || !entries.length) return 0;
     let added = 0;
     for (const [code, e] of entries) {
-      emoteMap.set(code, e);
-      added++;
-    }
-    return added;
-  }
-
-  function removeEmoteEntries(entries) {
-    if (!Array.isArray(entries) || !entries.length) return 0;
-    let removed = 0;
-    for (const [code, e] of entries) {
-      if (sameEmoteEntry([code, emoteMap.get(code)], [code, e])) {
-        emoteMap.delete(code);
-        removed++;
+      if (isChannel || !emoteMap.has(code)) {
+        emoteMap.set(code, e);
+        added++;
       }
     }
-    return removed;
+    return added;
   }
 
   // ─── Emote Loaders ────────────────────────────────────────────────────────
@@ -827,6 +817,7 @@
           });
           lastWrap.appendChild(zw);
           lastWrap.dataset.kteTip += ` + ${token}`;
+          lastWrap.dataset.kteTipCode += ` + ${token}`;
           // Keep lastWrap — multiple ZW emotes can stack on the same base
         } else {
           const wrap = makeEmoteWrap(token, emote);
@@ -1810,31 +1801,47 @@
     console.log(`${TAG} Loading emotes for /${channelSlug}…`);
 
     const allLoaders = [
-      options => loadBTTVGlobal(options),
-      options => load7TVGlobal(options),
-      options => loadFFZGlobal(options),
-      options => loadBTTVChannel(slug, options),
-      options => load7TVChannel(slug, options),
-      options => loadFFZChannel(slug, options),
+      { key: 'bttv_g', fn: options => loadBTTVGlobal(options), isChannel: false },
+      { key: '7tv_g', fn: options => load7TVGlobal(options), isChannel: false },
+      { key: 'ffz_g', fn: options => loadFFZGlobal(options), isChannel: false },
+      { key: `bttv_c_${slug}`, fn: options => loadBTTVChannel(slug, options), isChannel: true },
+      { key: `7tv_c_${slug}`, fn: options => load7TVChannel(slug, options), isChannel: true },
+      { key: `ffz_c_${slug}`, fn: options => loadFFZChannel(slug, options), isChannel: true },
     ];
 
     const failedLoaders = [];
+    const loadedProviders = new Map();
 
-    function applyProviderEntries(entries, previousEntries) {
+    // Channel emotes override globals; globals never overwrite an existing entry.
+    // Resolution order is non-deterministic, so rebuild from known provider layers
+    // when any provider updates.
+    function rebuildEmoteMap() {
+      emoteMap.clear();
+      for (const loader of allLoaders) {
+        const entries = loadedProviders.get(loader.key);
+        if (entries) mergeEmoteEntries(entries, loader.isChannel);
+      }
+    }
+
+    function applyProviderEntries(loader, entries) {
       if (seq !== initSeq || currentChannelSlug() !== slug) return;
-      const removed = removeEmoteEntries(previousEntries);
-      const added = mergeEmoteEntries(entries);
-      if (!added && !removed) return;
+      if (!Array.isArray(entries)) return false;
+      const previous = loadedProviders.get(loader.key);
+      if (!entries.length && !previous) return false;
+      if (previous && sameEmoteEntries(previous, entries)) return false;
+      loadedProviders.set(loader.key, entries);
+      rebuildEmoteMap();
       emoteVersion++;
       queueVisibleEmoteRefresh();
       queuePickerInject();
       acRefreshOpen();
+      return true;
     }
 
     // Update chat, autocomplete, and picker incrementally as each provider resolves.
-    const promises = allLoaders.map(fn => fn({
-      onRefresh: applyProviderEntries,
-    }).then(applyProviderEntries).catch(() => { failedLoaders.push(fn); }));
+    const promises = allLoaders.map(loader => loader.fn({
+      onRefresh: entries => applyProviderEntries(loader, entries),
+    }).then(entries => applyProviderEntries(loader, entries)).catch(() => { failedLoaders.push(loader); }));
 
     await Promise.allSettled(promises);
     if (seq !== initSeq || currentChannelSlug() !== slug) return;
@@ -1849,20 +1856,17 @@
       setTimeout(async () => {
         if (seq !== initSeq || currentChannelSlug() !== slug) return;
         const retryResults = await Promise.allSettled(
-          failedLoaders.map(fn => fn()),
+          failedLoaders.map(loader => loader.fn()),
         );
         if (seq !== initSeq || currentChannelSlug() !== slug) return;
         let added = 0;
-        for (const r of retryResults) {
+        for (let i = 0; i < retryResults.length; i++) {
+          const r = retryResults[i];
           if (r.status !== 'fulfilled' || !Array.isArray(r.value)) continue;
-          added += mergeEmoteEntries(r.value);
+          if (applyProviderEntries(failedLoaders[i], r.value)) added += r.value.length;
         }
         if (added) {
-          emoteVersion++;
           console.log(`${TAG} Retry loaded ${added} emotes`);
-          queueVisibleEmoteRefresh();
-          queuePickerInject();
-          acRefreshOpen();
         }
       }, 5000);
     }

@@ -6,16 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [2.6.39] - 2026-05-10
 
+### Changed
+- Load cached emote lists immediately with stale-while-revalidate refreshes in the background.
+- Cache global, channel, and empty provider results with separate TTLs so repeat visits avoid more API requests while empty channels update sooner.
+- Deduplicate in-flight provider requests and refresh visible chat as each provider finishes loading.
+
 ### Security
 - Harden cached emote validation so cached URLs must pass the trusted CDN allowlist before reuse.
 - Reject malformed cached emote codes and provider labels with whitespace, control characters, or excessive length.
 
 ## [2.6.38] - 2026-05-10
 
-### Changed
-- Load cached emote lists immediately with stale-while-revalidate refreshes in the background.
-- Cache global, channel, and empty provider results with separate TTLs so repeat visits avoid more API requests while empty channels update sooner.
-- Deduplicate in-flight provider requests and refresh visible chat as each provider finishes loading.
+### Fixed
+- Channel emotes no longer get clobbered when a global provider's response resolves after a channel response with a colliding name — channel entries now take precedence over globals.
+- Tooltip on a stacked zero-width emote now shows the zero-width name (e.g. `POGGERS + cvHazmat`) instead of just the base emote name.
 
 ## [2.6.37] - 2026-05-05
 
