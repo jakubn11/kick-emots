@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.37
+// @version      2.6.39
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -62,26 +62,49 @@
 
   // ─── Cache ────────────────────────────────────────────────────────────────
 
-  const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+  const GLOBAL_CACHE_TTL = 12 * 60 * 60 * 1000;
+  const CHANNEL_CACHE_TTL = 3 * 60 * 60 * 1000;
+  const EMPTY_CACHE_TTL = 15 * 60 * 1000;
+
+  function isSafeTextToken(value, maxLength) {
+    return typeof value === 'string'
+      && value.length > 0
+      && value.length <= maxLength
+      && !/[\s\u0000-\u001f\u007f]/.test(value);
+  }
+
+  function isSafeTextLabel(value, maxLength) {
+    return typeof value === 'string'
+      && value.length > 0
+      && value.length <= maxLength
+      && !/[\u0000-\u001f\u007f]/.test(value);
+  }
 
   function isValidCacheEntry(e) {
-    return Array.isArray(e) && typeof e[0] === 'string' &&
-      typeof e[1]?.url === 'string' && e[1].url.startsWith('https://') &&
-      typeof e[1]?.source === 'string';
+    return Array.isArray(e)
+      && isSafeTextToken(e[0], 100)
+      && typeof e[1]?.url === 'string'
+      && e[1].url.length <= 2048
+      && Boolean(safeUrl(e[1].url))
+      && isSafeTextLabel(e[1]?.source, 64);
   }
 
   const Cache = {
-    get(key) {
+    read(key) {
       try {
         const raw = localStorage.getItem(`kte_${key}`);
         if (!raw) return null;
         const { ts, data } = JSON.parse(raw);
-        if (!Array.isArray(data) || Date.now() - ts > CACHE_TTL || !data.every(isValidCacheEntry)) {
+        if (typeof ts !== 'number' || !Array.isArray(data) || !data.every(isValidCacheEntry)) {
           localStorage.removeItem(`kte_${key}`);
           return null;
         }
-        return data;
-      } catch { return null; }
+        return { ts, data };
+      } catch {
+        try { localStorage.removeItem(`kte_${key}`); }
+        catch { /* ignore */ }
+        return null;
+      }
     },
     set(key, data) {
       try { localStorage.setItem(`kte_${key}`, JSON.stringify({ ts: Date.now(), data })); }
@@ -92,13 +115,15 @@
   // ─── State ────────────────────────────────────────────────────────────────
 
   const emoteMap = new Map(); // code → { url, source, animated, zeroWidth }
-  const memoryCache = new Map(); // provider key → entries, avoids sync localStorage parse on SPA nav
+  const memoryCache = new Map(); // provider key → { ts, data }, avoids sync localStorage parse on SPA nav
+  const pendingLoads = new Map(); // provider key → Promise<entries>, deduplicates in-flight API fetches
 
   let channelSlug = null;
   let chatObserver = null;
   let inputObserver = null;
   let initSeq = 0;
   let emoteVersion = 0;
+  let visibleRefreshQueued = false;
   let pickerInjectQueued = false;
   let pickerInjectTimer = null;
   let messageProcessQueue = [];
@@ -396,6 +421,31 @@
     el.dataset.kteTipSource = source;
   }
 
+  function preconnectEmoteHosts() {
+    const origins = [
+      BTTV_API,
+      BTTV_CDN,
+      SEVENTV_API,
+      'https://cdn.7tv.app',
+      FFZ_API,
+      'https://cdn.frankerfacez.com',
+    ].map(url => new URL(url).origin);
+
+    const existing = new Set(
+      [...document.querySelectorAll('link[rel="preconnect"]')].map(link => link.href.replace(/\/$/, '')),
+    );
+
+    for (const origin of origins) {
+      if (existing.has(origin)) continue;
+      const link = document.createElement('link');
+      link.rel = 'preconnect';
+      link.href = origin;
+      link.crossOrigin = 'anonymous';
+      (document.head ?? document.documentElement).appendChild(link);
+      existing.add(origin);
+    }
+  }
+
   // ─── HTTP ─────────────────────────────────────────────────────────────────
 
   function fetchJSON(url, body) {
@@ -438,33 +488,105 @@
 
   // ─── Cache-aware load helper ──────────────────────────────────────────────
 
-  // `fetcher` must return an array of [code, emoteObj] pairs.
-  async function cachedLoad(key, fetcher) {
-    if (memoryCache.has(key)) return memoryCache.get(key);
-
-    const cached = Cache.get(key);
-    if (cached) {
-      memoryCache.set(key, cached);
-      return cached;
-    }
-
-    const entries = await fetcher();
-    const safeEntries = Array.isArray(entries) ? entries : [];
-    memoryCache.set(key, safeEntries);
-    RIC(() => Cache.set(key, safeEntries));
-    return safeEntries;
+  function cacheTtlFor(key, data) {
+    if (!data.length) return EMPTY_CACHE_TTL;
+    return key.endsWith('_g') ? GLOBAL_CACHE_TTL : CHANNEL_CACHE_TTL;
   }
 
-  function applyLoadResults(results) {
-    for (const result of results) {
-      if (result.status !== 'fulfilled' || !Array.isArray(result.value)) continue;
-      for (const [code, e] of result.value) emoteMap.set(code, e);
+  function cachedRecord(key) {
+    if (memoryCache.has(key)) return memoryCache.get(key);
+
+    const record = Cache.read(key);
+    if (record) memoryCache.set(key, record);
+    return record;
+  }
+
+  function isFreshCacheRecord(key, record) {
+    return Date.now() - record.ts <= cacheTtlFor(key, record.data);
+  }
+
+  function sameEmoteEntry(a, b) {
+    return a?.[0] === b?.[0]
+      && a?.[1]?.url === b?.[1]?.url
+      && a?.[1]?.source === b?.[1]?.source
+      && Boolean(a?.[1]?.animated) === Boolean(b?.[1]?.animated)
+      && Boolean(a?.[1]?.zeroWidth) === Boolean(b?.[1]?.zeroWidth);
+  }
+
+  function sameEmoteEntries(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!sameEmoteEntry(a[i], b[i])) return false;
     }
+    return true;
+  }
+
+  function fetchAndCache(key, fetcher) {
+    if (pendingLoads.has(key)) return pendingLoads.get(key);
+
+    const pending = Promise.resolve()
+      .then(fetcher)
+      .then(entries => {
+        const safeEntries = Array.isArray(entries) ? entries.filter(isValidCacheEntry) : [];
+        const record = { ts: Date.now(), data: safeEntries };
+        memoryCache.set(key, record);
+        RIC(() => Cache.set(key, safeEntries));
+        return safeEntries;
+      })
+      .finally(() => {
+        pendingLoads.delete(key);
+      });
+
+    pendingLoads.set(key, pending);
+    return pending;
+  }
+
+  // `fetcher` must return an array of [code, emoteObj] pairs.
+  async function cachedLoad(key, fetcher, options = {}) {
+    const record = cachedRecord(key);
+
+    if (record) {
+      if (!isFreshCacheRecord(key, record) && options.revalidate !== false) {
+        const cachedData = record.data;
+        fetchAndCache(key, fetcher).then(entries => {
+          if (typeof options.onRefresh === 'function' && !sameEmoteEntries(cachedData, entries)) {
+            options.onRefresh(entries, cachedData, key);
+          }
+        }).catch(() => {
+          // Keep serving stale cache when a background refresh fails.
+        });
+      }
+      return record.data;
+    }
+
+    return fetchAndCache(key, fetcher);
+  }
+
+  function mergeEmoteEntries(entries) {
+    if (!Array.isArray(entries) || !entries.length) return 0;
+    let added = 0;
+    for (const [code, e] of entries) {
+      emoteMap.set(code, e);
+      added++;
+    }
+    return added;
+  }
+
+  function removeEmoteEntries(entries) {
+    if (!Array.isArray(entries) || !entries.length) return 0;
+    let removed = 0;
+    for (const [code, e] of entries) {
+      if (sameEmoteEntry([code, emoteMap.get(code)], [code, e])) {
+        emoteMap.delete(code);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   // ─── Emote Loaders ────────────────────────────────────────────────────────
 
-  async function loadBTTVGlobal() {
+  async function loadBTTVGlobal(options) {
     return cachedLoad('bttv_g', async () => {
       const emotes = await fetchJSON(`${BTTV_API}/cached/emotes/global`);
       return emotes.map(e => [e.code, {
@@ -473,10 +595,10 @@
         animated: e.animated,
         zeroWidth: false,
       }]);
-    });
+    }, options);
   }
 
-  async function loadBTTVChannel(slug) {
+  async function loadBTTVChannel(slug, options) {
     return cachedLoad(`bttv_c_${slug}`, async () => {
       const results = await Promise.allSettled(['kick', 'twitch'].map(async platform => {
         const data = await fetchJSON(`${BTTV_API}/cached/users/${platform}/${slug}`);
@@ -494,10 +616,10 @@
         }]);
       }
       return [];
-    });
+    }, options);
   }
 
-  async function load7TVGlobal() {
+  async function load7TVGlobal(options) {
     return cachedLoad('7tv_g', async () => {
       const data = await fetchJSON(`${SEVENTV_API}/emote-sets/global`);
       const entries = [];
@@ -520,10 +642,10 @@
         }]);
       }
       return entries;
-    });
+    }, options);
   }
 
-  async function load7TVChannel(slug) {
+  async function load7TVChannel(slug, options) {
     return cachedLoad(`7tv_c_${slug}`, async () => {
       // v4 GQL: search by username, find the user with a matching KICK (or TWITCH) connection
       const query = `{ users { search(query: ${JSON.stringify(slug)}, page: 1, perPage: 10) {
@@ -559,10 +681,10 @@
         }
         return entries;
       } catch { return []; }
-    });
+    }, options);
   }
 
-  async function loadFFZGlobal() {
+  async function loadFFZGlobal(options) {
     return cachedLoad('ffz_g', async () => {
       const data = await fetchJSON(`${FFZ_API}/set/global`);
       const entries = [];
@@ -579,10 +701,10 @@
         }
       }
       return entries;
-    });
+    }, options);
   }
 
-  async function loadFFZChannel(slug) {
+  async function loadFFZChannel(slug, options) {
     return cachedLoad(`ffz_c_${slug}`, async () => {
       try {
         const data = await fetchJSON(`${FFZ_API}/room/${slug}`);
@@ -601,7 +723,7 @@
         }
         return entries;
       } catch { return []; }
-    });
+    }, options);
   }
 
   // ─── DOM Processing ───────────────────────────────────────────────────────
@@ -757,6 +879,25 @@
     RIC(step);
   }
 
+  function clearProcessedMessageMarks() {
+    document.querySelectorAll('[data-kte-done]').forEach(el => {
+      delete el.dataset.kteDone;
+    });
+  }
+
+  function queueVisibleEmoteRefresh() {
+    if (visibleRefreshQueued) return;
+    visibleRefreshQueued = true;
+
+    const seq = initSeq;
+    RIC(() => {
+      visibleRefreshQueued = false;
+      if (seq !== initSeq) return;
+      clearProcessedMessageMarks();
+      processAllVisible();
+    });
+  }
+
   function processMessageTree(root) {
     if (root.matches?.(MSG_SELECTOR)) processMessageEl(root);
     root.querySelectorAll?.(MSG_SELECTOR).forEach(processMessageEl);
@@ -840,6 +981,13 @@
     acInput = null;
   }
 
+  function acRefreshOpen() {
+    if (!acInput?.isConnected) return;
+    const word = acWordBeforeCursor(acInput);
+    const matches = acSearch(word);
+    matches.length ? acRender(matches, acInput) : acHide();
+  }
+
   function acSetFocus(idx) {
     acFocusIdx = idx;
     acDropdown?.querySelectorAll('.kte-ac-row').forEach((r, i) => {
@@ -905,10 +1053,11 @@
       row.className = 'kte-ac-row';
 
       const acUrl = safeUrl(emote.url);
+      if (!acUrl) continue;
       const img = document.createElement('img');
       img.src = acUrl;
       img.alt = code;
-      if (acUrl) img.addEventListener('error', () => {
+      img.addEventListener('error', () => {
         if (img._kteRetry) return;
         img._kteRetry = true;
         setTimeout(() => { img.src = acUrl; }, 2000);
@@ -1638,6 +1787,8 @@
   async function init() {
     const seq = ++initSeq;
     const slug = currentChannelSlug();
+    preconnectEmoteHosts();
+
     if (!slug) {
       channelSlug = null;
       emoteMap.clear();
@@ -1655,29 +1806,42 @@
     hideTooltip();
     resetPicker();
     startChatObserver();
+    waitForInput();
     console.log(`${TAG} Loading emotes for /${channelSlug}…`);
 
-    const allLoaders = [loadBTTVGlobal, load7TVGlobal, loadFFZGlobal,
-      () => loadBTTVChannel(slug), () => load7TVChannel(slug), () => loadFFZChannel(slug)];
+    const allLoaders = [
+      options => loadBTTVGlobal(options),
+      options => load7TVGlobal(options),
+      options => loadFFZGlobal(options),
+      options => loadBTTVChannel(slug, options),
+      options => load7TVChannel(slug, options),
+      options => loadFFZChannel(slug, options),
+    ];
 
     const failedLoaders = [];
 
-    // Update picker incrementally as each provider resolves
-    const promises = allLoaders.map(fn => fn().then(entries => {
+    function applyProviderEntries(entries, previousEntries) {
       if (seq !== initSeq || currentChannelSlug() !== slug) return;
-      if (!Array.isArray(entries) || !entries.length) return;
-      for (const [code, e] of entries) emoteMap.set(code, e);
+      const removed = removeEmoteEntries(previousEntries);
+      const added = mergeEmoteEntries(entries);
+      if (!added && !removed) return;
       emoteVersion++;
+      queueVisibleEmoteRefresh();
       queuePickerInject();
-    }).catch(() => { failedLoaders.push(fn); }));
+      acRefreshOpen();
+    }
+
+    // Update chat, autocomplete, and picker incrementally as each provider resolves.
+    const promises = allLoaders.map(fn => fn({
+      onRefresh: applyProviderEntries,
+    }).then(applyProviderEntries).catch(() => { failedLoaders.push(fn); }));
 
     await Promise.allSettled(promises);
     if (seq !== initSeq || currentChannelSlug() !== slug) return;
 
     console.log(`${TAG} Ready – ${emoteMap.size} emotes for /${channelSlug}`);
 
-    processAllVisible();
-    waitForInput();
+    queueVisibleEmoteRefresh();
     queuePickerInject();
 
     if (failedLoaders.length) {
@@ -1691,14 +1855,14 @@
         let added = 0;
         for (const r of retryResults) {
           if (r.status !== 'fulfilled' || !Array.isArray(r.value)) continue;
-          for (const [code, e] of r.value) { emoteMap.set(code, e); added++; }
+          added += mergeEmoteEntries(r.value);
         }
         if (added) {
           emoteVersion++;
           console.log(`${TAG} Retry loaded ${added} emotes`);
-          document.querySelectorAll('[data-kte-done]').forEach(el => { delete el.dataset.kteDone; });
-          processAllVisible();
+          queueVisibleEmoteRefresh();
           queuePickerInject();
+          acRefreshOpen();
         }
       }, 5000);
     }

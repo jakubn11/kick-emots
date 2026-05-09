@@ -34,7 +34,7 @@
 - Hover tooltips showing emote name and provider
 - Autocomplete popup when typing (prefix match, keyboard navigation)
 - Third-party emote tab inside Kick's native emote picker with search, animated emotes, and per-provider **Load more**
-- 1-hour localStorage cache per provider to avoid redundant API requests
+- Stale-while-revalidate local cache per provider to show repeat-visit emotes immediately while refreshing in the background
 - Works with Kick's SPA routing — no page reload needed when switching channels
 
 ## Requirements
