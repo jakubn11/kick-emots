@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.40] - 2026-05-10
+
+### Fixed
+- Reduce Kick page lag while scrolling the third-party emote picker by throttling picker image scans.
+- Delay off-screen picker thumbnail unloading until scrolling settles, avoiding repeated layout work during active scroll.
+- Contain scroll behavior on Kick's detected native picker viewport while the third-party tab is active.
+- Avoid re-checking the picker on unrelated chat DOM mutations while the picker is open.
+
 ## [2.6.39] - 2026-05-10
 
 ### Changed

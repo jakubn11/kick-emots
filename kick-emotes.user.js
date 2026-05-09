@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.39
+// @version      2.6.40
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -1134,6 +1134,8 @@
   const PICKER_INJECT_DELAY = 120;
   const PICKER_IMAGE_LOAD_CHUNK = 6;
   const PICKER_IMAGE_LOAD_DELAY = 50;
+  const PICKER_IMAGE_SCAN_DELAY = 120;
+  const PICKER_IMAGE_UNLOAD_DELAY = 700;
   const PICKER_IMAGE_VIEWPORT_BUFFER = 180;
   const PICKER_IMAGE_UNLOAD_BUFFER = 700;
 
@@ -1213,7 +1215,7 @@
     return panel ?? content;
   }
 
-  function pickerQueueVisibleImages(content, viewport = pickerFindImageViewport(content)) {
+  function pickerQueueVisibleImages(content, viewport = pickerFindImageViewport(content), unloadFarImages = false) {
     if (!content || content.hidden) return;
     const viewportRect = viewport?.getBoundingClientRect?.() ?? { top: 0, bottom: window.innerHeight };
     const top = viewportRect.top - PICKER_IMAGE_VIEWPORT_BUFFER;
@@ -1230,22 +1232,23 @@
       });
     }
 
-    content.querySelectorAll('img[data-kte-loaded="1"]').forEach(img => {
-      const rect = (img.parentElement ?? img).getBoundingClientRect();
-      if (rect.bottom >= unloadTop && rect.top <= unloadBottom) return;
-      img.removeAttribute('src');
-      delete img.dataset.kteLoaded;
-      delete img.dataset.kteQueued;
-      delete img._kteRetry;
-    });
-
-    const pending = [...content.querySelectorAll('img[data-kte-src]:not([data-kte-loaded="1"]):not([data-kte-queued="1"])')]
-      .filter(img => {
+    if (unloadFarImages) {
+      content.querySelectorAll('img[data-kte-loaded="1"]').forEach(img => {
         const rect = (img.parentElement ?? img).getBoundingClientRect();
-        return rect.bottom >= top && rect.top <= bottom;
+        if (rect.bottom >= unloadTop && rect.top <= unloadBottom) return;
+        img.removeAttribute('src');
+        delete img.dataset.kteLoaded;
+        delete img.dataset.kteQueued;
+        delete img._kteRetry;
       });
+    }
+
     if (!content._kteImageQueue) content._kteImageQueue = [];
-    for (const img of pending) {
+
+    for (const img of content.querySelectorAll('img[data-kte-src]:not([data-kte-loaded="1"]):not([data-kte-queued="1"])')) {
+      const rect = (img.parentElement ?? img).getBoundingClientRect();
+      if (rect.top > bottom) break;
+      if (rect.bottom < top) continue;
       img.dataset.kteQueued = '1';
       content._kteImageQueue.push(img);
     }
@@ -1259,25 +1262,51 @@
       window.removeEventListener('resize', content._kteImageScrollHandler);
     }
     if (content._kteImageFrame) cancelAnimationFrame(content._kteImageFrame);
+    if (content._kteImageTimer) clearTimeout(content._kteImageTimer);
+    if (content._kteImageUnloadTimer) clearTimeout(content._kteImageUnloadTimer);
+    if (content._kteImageScrollTarget && content._kteScrollContainValue !== undefined) {
+      content._kteImageScrollTarget.style.overscrollBehavior = content._kteScrollContainValue;
+    }
     content._kteImageScrollTarget = null;
     content._kteImageScrollHandler = null;
     content._kteImageFrame = null;
+    content._kteImageTimer = null;
+    content._kteImageUnloadTimer = null;
+    content._kteScrollContainValue = undefined;
   }
 
   function pickerAttachImageLoader(content, viewport = pickerFindImageViewport(content)) {
     if (!content || !viewport) return;
     if (content._kteImageScrollTarget === viewport && content._kteImageScrollHandler) {
-      pickerQueueVisibleImages(content, viewport);
+      content._kteImageScrollHandler();
       return;
     }
 
     pickerDetachImageLoader(content);
+    content._kteScrollContainValue = viewport.style.overscrollBehavior;
+    viewport.style.overscrollBehavior = 'contain';
+
     const schedule = () => {
-      if (content._kteImageFrame) return;
-      content._kteImageFrame = requestAnimationFrame(() => {
-        content._kteImageFrame = null;
-        pickerQueueVisibleImages(content, viewport);
-      });
+      if (content._kteImageUnloadTimer) clearTimeout(content._kteImageUnloadTimer);
+      content._kteImageUnloadTimer = setTimeout(() => {
+        content._kteImageUnloadTimer = null;
+        pickerQueueVisibleImages(content, viewport, true);
+      }, PICKER_IMAGE_UNLOAD_DELAY);
+
+      if (content._kteImageFrame || content._kteImageTimer) return;
+
+      const elapsed = Date.now() - (content._kteLastImageScan ?? 0);
+      const run = () => {
+        content._kteImageTimer = null;
+        content._kteImageFrame = requestAnimationFrame(() => {
+          content._kteImageFrame = null;
+          content._kteLastImageScan = Date.now();
+          pickerQueueVisibleImages(content, viewport);
+        });
+      };
+
+      if (elapsed >= PICKER_IMAGE_SCAN_DELAY) run();
+      else content._kteImageTimer = setTimeout(run, PICKER_IMAGE_SCAN_DELAY - elapsed);
     };
 
     content._kteImageScrollTarget = viewport;
@@ -1732,7 +1761,7 @@
   function startChatObserver() {
     if (chatObserver) chatObserver.disconnect();
     chatObserver = new MutationObserver(mutations => {
-      let shouldCheckPicker = false;
+      let pickerPanelToInject = null;
 
       for (const mut of mutations) {
         // Virtual list recycles elements by changing data-index — clear stale marks
@@ -1746,24 +1775,25 @@
         for (const added of mut.addedNodes) {
           if (added.nodeType !== Node.ELEMENT_NODE) continue;
           if (isOwnUINode(added)) continue;
+          if (added.id === 'chat-emotes-picker-panel') {
+            pickerPanelToInject = added;
+            continue;
+          }
           const containingPicker = added.closest?.('#chat-emotes-picker-panel');
           if (containingPicker) {
-            queuePickerInject(containingPicker);
+            pickerPanelToInject = containingPicker;
             continue;
           }
-          if (added.id === 'chat-emotes-picker-panel') {
-            queuePickerInject(added);
+          const nestedPicker = added.querySelector?.('#chat-emotes-picker-panel');
+          if (nestedPicker) {
+            pickerPanelToInject = nestedPicker;
             continue;
           }
-          shouldCheckPicker = true;
           queueProcessMessageTree(added);
         }
       }
 
-      if (shouldCheckPicker) {
-        const pickerPanel = document.getElementById('chat-emotes-picker-panel');
-        if (pickerPanel) queuePickerInject(pickerPanel);
-      }
+      if (pickerPanelToInject) queuePickerInject(pickerPanelToInject);
     });
     chatObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-index'] });
   }
