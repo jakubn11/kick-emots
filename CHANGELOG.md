@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.42] - 2026-05-10
+
+### Fixed
+- Reduce page lag after clicking **Load more** in large 7TV picker sections by appending new emote buttons in small idle chunks.
+- Pace picker thumbnail URL assignment so animated emote decoding is spread out instead of bursting all at once.
+- Coalesce picker rebuilds for a short window after stream switches and defer stale refreshes while **Load more** is still appending.
+- Preserve third-party picker scroll position when provider updates refresh the same channel's picker content.
+
 ## [2.6.41] - 2026-05-10
 
 ### Fixed

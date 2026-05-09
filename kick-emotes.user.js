@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.41
+// @version      2.6.42
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -128,6 +128,7 @@
   let pickerInjectTimer = null;
   let messageProcessQueue = [];
   let messageProcessQueued = false;
+  let lastNavigationAt = 0;
   let lastPath = location.pathname;
 
   let acDropdown = null;
@@ -1132,8 +1133,12 @@
 
   const PICKER_PROVIDER_LIMIT = 40;
   const PICKER_INJECT_DELAY = 120;
-  const PICKER_IMAGE_LOAD_CHUNK = 6;
-  const PICKER_IMAGE_LOAD_DELAY = 50;
+  const PICKER_ROUTE_INJECT_DELAY = 700;
+  const PICKER_APPEND_REFRESH_DELAY = 260;
+  const PICKER_APPEND_CHUNK = 10;
+  const PICKER_APPEND_DELAY = 24;
+  const PICKER_IMAGE_LOAD_CHUNK = 4;
+  const PICKER_IMAGE_LOAD_DELAY = 60;
   const PICKER_IMAGE_SCAN_DELAY = 120;
   const PICKER_IMAGE_UNLOAD_DELAY = 700;
   const PICKER_IMAGE_VIEWPORT_BUFFER = 180;
@@ -1339,12 +1344,37 @@
     grid.appendChild(frag);
   }
 
+  function pickerAppendButtonsChunked(grid, emotes, start, end, onChunk, onDone) {
+    let index = start;
+
+    function step() {
+      if (!grid.isConnected) {
+        onDone?.();
+        return;
+      }
+      const next = Math.min(index + PICKER_APPEND_CHUNK, end);
+      pickerAppendButtons(grid, emotes, index, next);
+      index = next;
+      onChunk?.(index);
+
+      if (index < end) {
+        setTimeout(() => RIC(step), PICKER_APPEND_DELAY);
+      } else {
+        onDone?.();
+      }
+    }
+
+    RIC(step);
+  }
+
   function pickerMarkContentStale(content) {
     if (content) {
       pickerDetachImageLoader(content);
       content.dataset.kteStale = '1';
       content._kteImageQueue = [];
       content._kteImageLoading = false;
+      content._kteAppendingMore = false;
+      content._kteRefreshAfterAppend = false;
     }
   }
 
@@ -1360,17 +1390,30 @@
       const next = Math.min(shown + PICKER_PROVIDER_LIMIT, emotes.length);
       more.disabled = true;
       more.textContent = 'Loading...';
-      pickerAppendButtons(grid, emotes, shown, next);
-      shown = next;
-      limitEl.textContent = `Showing ${shown} of ${emotes.length}`;
       const content = grid.closest('#kte-picker-content');
-      pickerAttachImageLoader(content, content?._kteImageViewportFallback ?? content?._kteImageScrollTarget);
-      if (shown >= emotes.length) {
-        more.remove();
-      } else {
-        more.disabled = false;
-        more.textContent = 'Load more';
-      }
+      if (content) content._kteAppendingMore = true;
+
+      pickerAppendButtonsChunked(grid, emotes, shown, next, current => {
+        shown = current;
+        limitEl.textContent = `Showing ${shown} of ${emotes.length}`;
+        pickerAttachImageLoader(content, content?._kteImageViewportFallback ?? content?._kteImageScrollTarget);
+      }, () => {
+        if (content) {
+          content._kteAppendingMore = false;
+          if (content._kteRefreshAfterAppend) {
+            content._kteRefreshAfterAppend = false;
+            const panel = content.closest('#chat-emotes-picker-panel');
+            if (panel) queuePickerInject(panel, PICKER_APPEND_REFRESH_DELAY);
+          }
+        }
+        if (!more.isConnected) return;
+        if (shown >= emotes.length) {
+          more.remove();
+        } else {
+          more.disabled = false;
+          more.textContent = 'Load more';
+        }
+      });
     });
 
     return more;
@@ -1556,6 +1599,8 @@
     if (!parts) return null;
 
     const oldContent = panel.querySelector('#kte-picker-content');
+    const keepScroll = oldContent?.dataset.kteChannel === (channelSlug ?? '');
+    const scrollTop = keepScroll ? oldContent.scrollTop : 0;
 
     const tab = panel.querySelector('#kte-picker-tab');
     const active = tab?.getAttribute('data-active') === 'true';
@@ -1572,7 +1617,7 @@
     else parts.mainGrid.appendChild(content);
 
     if (!content.hidden) {
-      content.scrollTop = 0;
+      content.scrollTop = scrollTop;
       pickerAttachImageLoader(content, parts.scrollViewport);
     }
     return content;
@@ -1723,6 +1768,11 @@
         || content.dataset.kteEmoteVersion !== String(emoteVersion));
 
     if (active && (!content || stale)) {
+      if (content?._kteAppendingMore) {
+        content._kteRefreshAfterAppend = true;
+        queuePickerInject(panel, PICKER_APPEND_REFRESH_DELAY);
+        return;
+      }
       pickerRefreshContent(panel);
     } else if (!active && stale) {
       pickerMarkContentStale(content);
@@ -1733,7 +1783,7 @@
     pickerApplyActiveState(panel);
   }
 
-  function queuePickerInject(panel) {
+  function queuePickerInject(panel, delay = PICKER_INJECT_DELAY) {
     if (pickerInjectTimer) clearTimeout(pickerInjectTimer);
     pickerInjectQueued = true;
     const seq = initSeq;
@@ -1745,7 +1795,7 @@
         const target = panel?.isConnected ? panel : document.getElementById('chat-emotes-picker-panel');
         if (target) pickerInject(target);
       });
-    }, PICKER_INJECT_DELAY);
+    }, delay);
   }
 
   function resetPicker() {
@@ -1818,6 +1868,12 @@
     return NON_CHANNEL_SLUGS.has(slug) ? null : slug || null;
   }
 
+  function pickerProviderInjectDelay() {
+    return Date.now() - lastNavigationAt < 2500
+      ? PICKER_ROUTE_INJECT_DELAY
+      : PICKER_INJECT_DELAY;
+  }
+
   async function init() {
     const seq = ++initSeq;
     const slug = currentChannelSlug();
@@ -1876,7 +1932,7 @@
       rebuildEmoteMap();
       emoteVersion++;
       queueVisibleEmoteRefresh();
-      queuePickerInject();
+      queuePickerInject(null, pickerProviderInjectDelay());
       acRefreshOpen();
       return true;
     }
@@ -1892,7 +1948,7 @@
     console.log(`${TAG} Ready – ${emoteMap.size} emotes for /${channelSlug}`);
 
     queueVisibleEmoteRefresh();
-    queuePickerInject();
+    queuePickerInject(null, pickerProviderInjectDelay());
 
     if (failedLoaders.length) {
       console.log(`${TAG} ${failedLoaders.length} provider(s) failed, retrying in 5s…`);
@@ -1919,6 +1975,7 @@
 
   function handleNavigation() {
     initSeq++;
+    lastNavigationAt = Date.now();
     chatObserver?.disconnect(); chatObserver = null;
     inputObserver?.disconnect(); inputObserver = null;
     emoteMap.clear();
