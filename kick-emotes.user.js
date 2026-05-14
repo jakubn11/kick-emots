@@ -7,6 +7,8 @@
 // @license      GPL-3.0-only
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMxMDEwMTMiLz48cmVjdCB4PSIxNCIgeT0iMTQiIHdpZHRoPSIzNiIgaGVpZ2h0PSIzNiIgcng9IjEyIiBmaWxsPSIjMjJjNTVlIi8+PGNpcmNsZSBjeD0iMjUiIGN5PSIyNSIgcj0iNCIgZmlsbD0iIzEwMTAxMyIvPjxjaXJjbGUgY3g9IjM5IiBjeT0iMjUiIHI9IjQiIGZpbGw9IiMxMDEwMTMiLz48Y2lyY2xlIGN4PSIyNSIgY3k9IjM5IiByPSI0IiBmaWxsPSIjMTAxMDEzIi8+PGNpcmNsZSBjeD0iMzkiIGN5PSIzOSIgcj0iNCIgZmlsbD0iIzEwMTAxMyIvPjwvc3ZnPg==
 // @match        https://kick.com/*
+// @updateURL    https://github.com/jakubn11/kick-emotes/releases/latest/download/kick-emotes.user.js
+// @downloadURL  https://github.com/jakubn11/kick-emotes/releases/latest/download/kick-emotes.user.js
 // @grant        GM_xmlhttpRequest
 // @connect      api.betterttv.net
 // @connect      cdn.betterttv.net
