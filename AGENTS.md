@@ -37,7 +37,7 @@ The userscript header controls permissions and host access. Keep it valid across
 - `@match` should remain scoped to `https://kick.com/*` unless the target changes.
 - Add any new remote domains to `@connect`.
 - Keep `@grant GM_xmlhttpRequest` if fetching third-party APIs cross-origin.
-- `@updateURL` / `@downloadURL` point at the latest GitHub Release asset. If the repo moves or the release-asset filename changes, update both.
+- `@updateURL` / `@downloadURL` point at the `main` branch on GitHub. If the repo or branch moves, update both.
 - Bump `@version` when changing user-facing behavior or provider logic.
 
 Do not add `Co-Authored-By:` trailers to git commits.
