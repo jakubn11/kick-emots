@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Kick Third-Party Emotes
 // @namespace    https://kick.com
-// @version      2.6.44
+// @version      2.7.0
 // @description  BetterTTV, 7TV, FrankerFaceZ emotes on Kick.com — cache, zero-width, autocomplete, native picker. Developed for Safari + Userscripts; other browsers/managers untested.
 // @author       jakubnl94@gmail.com
 // @license      GPL-3.0-only
@@ -83,33 +83,44 @@
   }
 
   function isValidCacheEntry(e) {
-    return Array.isArray(e)
-      && isSafeTextToken(e[0], 100)
-      && typeof e[1]?.url === 'string'
-      && e[1].url.length <= 2048
-      && Boolean(safeUrl(e[1].url))
-      && isSafeTextLabel(e[1]?.source, 64);
+    if (!Array.isArray(e)
+      || !isSafeTextToken(e[0], 100)
+      || typeof e[1]?.url !== 'string'
+      || e[1].url.length > 2048
+      || !safeUrl(e[1].url)
+      || !isSafeTextLabel(e[1]?.source, 64)) return false;
+    if (e[1].staticUrl !== undefined) {
+      if (typeof e[1].staticUrl !== 'string'
+        || e[1].staticUrl.length > 2048
+        || !safeUrl(e[1].staticUrl)) return false;
+    }
+    return true;
   }
+
+  // Prefix bumped from `kte_` to `kte_v2_` when adding `staticUrl` to the
+  // emote schema. Old keys become orphans but stay quota-cheap; they'll fall
+  // out naturally as the browser evicts unused localStorage entries.
+  const CACHE_PREFIX = 'kte_v2_';
 
   const Cache = {
     read(key) {
       try {
-        const raw = localStorage.getItem(`kte_${key}`);
+        const raw = localStorage.getItem(`${CACHE_PREFIX}${key}`);
         if (!raw) return null;
         const { ts, data } = JSON.parse(raw);
         if (typeof ts !== 'number' || !Array.isArray(data) || !data.every(isValidCacheEntry)) {
-          localStorage.removeItem(`kte_${key}`);
+          localStorage.removeItem(`${CACHE_PREFIX}${key}`);
           return null;
         }
         return { ts, data };
       } catch {
-        try { localStorage.removeItem(`kte_${key}`); }
+        try { localStorage.removeItem(`${CACHE_PREFIX}${key}`); }
         catch { /* ignore */ }
         return null;
       }
     },
     set(key, data) {
-      try { localStorage.setItem(`kte_${key}`, JSON.stringify({ ts: Date.now(), data })); }
+      try { localStorage.setItem(`${CACHE_PREFIX}${key}`, JSON.stringify({ ts: Date.now(), data })); }
       catch { /* quota exceeded – skip silently */ }
     },
   };
@@ -125,9 +136,7 @@
   let inputObserver = null;
   let initSeq = 0;
   let emoteVersion = 0;
-  let visibleRefreshQueued = false;
   let visibleRefreshTimer = null;
-  let pickerInjectQueued = false;
   let pickerInjectTimer = null;
   let messageProcessQueue = [];
   let messageProcessQueued = false;
@@ -139,6 +148,15 @@
   let acMatches = [];
   let acInput = null;
   let tipEl = null;
+
+  // Tracks the picker content currently holding viewport scroll + window resize
+  // listeners. Lets handleNavigation force-detach even if Kick already removed
+  // the picker panel from the DOM.
+  let activePickerImageLoader = null;
+
+  // Currently-attached autocomplete input. Lets the input observer skip work
+  // while the input is still connected, and re-attach when Kick swaps it out.
+  let attachedAcInput = null;
 
   // ─── Styles ───────────────────────────────────────────────────────────────
 
@@ -307,6 +325,9 @@
       justify-content: center;
       cursor: pointer;
       background: transparent;
+      contain: layout style paint;
+      content-visibility: auto;
+      contain-intrinsic-size: 38px 38px;
     }
     .kte-picker-btn:hover,
     .kte-picker-btn:focus-visible {
@@ -490,6 +511,12 @@
       ?? images[0];
   }
 
+  function pick7TVStaticImage(images) {
+    return images.find(i => i.mime === 'image/webp' && i.scale === 2 && i.url.includes('_static'))
+      ?? images.find(i => i.mime === 'image/webp' && i.url.includes('_static'))
+      ?? null;
+  }
+
   // ─── Cache-aware load helper ──────────────────────────────────────────────
 
   function cacheTtlFor(key, data) {
@@ -627,13 +654,20 @@
           : (host.files?.find(f => f.name === '2x.webp') ?? host.files?.find(f => f.name === '2x.avif')
             ?? host.files?.[0]);
         if (!file) continue;
+        const staticFile = animated
+          ? (host.files?.find(f => f.name === '2x_static.webp') ?? host.files?.find(f => f.name.endsWith('_static.webp')))
+          : null;
         // ActiveEmoteFlag.ZeroWidth = 1 << 8 = 256 on the emote-set entry flags
-        entries.push([e.name, {
+        const entry = {
           url: `https:${host.url}/${file.name}`,
           source: '7TV',
           animated,
           zeroWidth: (e.flags & 256) !== 0,
-        }]);
+        };
+        if (staticFile && staticFile.name !== file.name) {
+          entry.staticUrl = `https:${host.url}/${staticFile.name}`;
+        }
+        entries.push([e.name, entry]);
       }
       return entries;
     }, options);
@@ -666,12 +700,17 @@
           const images = e.emote?.images ?? [];
           const img = pick7TVImage(images, animated);
           if (!img) continue;
-          entries.push([e.alias, {
+          const staticImg = animated ? pick7TVStaticImage(images) : null;
+          const entry = {
             url: img.url,
             source: '7TV',
             animated,
             zeroWidth: e.flags?.zeroWidth ?? false,
-          }]);
+          };
+          if (staticImg && staticImg.url !== img.url) {
+            entry.staticUrl = staticImg.url;
+          }
+          entries.push([e.alias, entry]);
         }
         return entries;
       } catch { return []; }
@@ -889,13 +928,11 @@
 
   function queueVisibleEmoteRefresh(delay = 0) {
     if (visibleRefreshTimer) clearTimeout(visibleRefreshTimer);
-    visibleRefreshQueued = true;
 
     const seq = initSeq;
     visibleRefreshTimer = setTimeout(() => {
       visibleRefreshTimer = null;
       RIC(() => {
-        visibleRefreshQueued = false;
         if (seq !== initSeq) return;
         processAllVisible();
       });
@@ -966,15 +1003,32 @@
     return (before.match(/(\S+)$/) ?? [])[1] ?? '';
   }
 
+  let acIndex = null;
+  let acIndexVersion = -1;
+
+  function acGetIndex() {
+    if (acIndexVersion === emoteVersion && acIndex) return acIndex;
+    acIndex = [];
+    for (const [code, emote] of emoteMap) {
+      acIndex.push({ code, lower: code.toLowerCase(), emote });
+    }
+    acIndex.sort((a, b) => a.code.length - b.code.length || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+    acIndexVersion = emoteVersion;
+    return acIndex;
+  }
+
   function acSearch(query) {
     if (query.length < 2) return [];
     const lower = query.toLowerCase();
+    const index = acGetIndex();
     const results = [];
-    for (const [code, emote] of emoteMap) {
-      if (code.toLowerCase().startsWith(lower)) results.push({ code, emote });
+    for (const entry of index) {
+      if (entry.lower.startsWith(lower)) {
+        results.push({ code: entry.code, emote: entry.emote });
+        if (results.length === 8) break;
+      }
     }
-    results.sort((a, b) => a.code.length - b.code.length || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
-    return results.slice(0, 8);
+    return results;
   }
 
   function acHide() {
@@ -1123,12 +1177,25 @@
     console.log(`${TAG} Autocomplete attached`);
   }
 
+  function attemptAcAttach() {
+    if (attachedAcInput?.isConnected) return;
+    const found = acFindInput();
+    if (!found) return;
+    attachAutocomplete(found);
+    attachedAcInput = found;
+  }
+
   function waitForInput() {
     inputObserver?.disconnect();
     inputObserver = null;
+    attachedAcInput = null;
 
     const el = acFindInput();
-    if (el) { attachAutocomplete(el); return; }
+    if (el) {
+      attachAutocomplete(el);
+      attachedAcInput = el;
+      return;
+    }
 
     inputObserver = new MutationObserver(() => {
       const found = acFindInput();
@@ -1136,6 +1203,7 @@
         inputObserver?.disconnect();
         inputObserver = null;
         attachAutocomplete(found);
+        attachedAcInput = found;
       }
     });
     inputObserver.observe(document.body, { childList: true, subtree: true });
@@ -1153,10 +1221,14 @@
   const PICKER_APPEND_DELAY = 24;
   const PICKER_IMAGE_LOAD_CHUNK = 4;
   const PICKER_IMAGE_LOAD_DELAY = 60;
-  const PICKER_IMAGE_SCAN_DELAY = 120;
-  const PICKER_IMAGE_UNLOAD_DELAY = 700;
+  const PICKER_IMAGE_UNLOAD_DELAY = 250;
   const PICKER_IMAGE_VIEWPORT_BUFFER = 180;
-  const PICKER_IMAGE_UNLOAD_BUFFER = 700;
+  const PICKER_IMAGE_UNLOAD_BUFFER = 200;
+  // Hard cap on simultaneously loaded picker images. Even within the unload
+  // zone, anything past this count gets evicted (furthest from viewport first).
+  // Has to be tight because in fullscreen the video player is already holding
+  // a large GPU texture, so we share what's left with very little headroom.
+  const PICKER_MAX_LOADED = 40;
 
   function pickerBuildButton(code, emote) {
     const btn = document.createElement('button');
@@ -1166,14 +1238,23 @@
     btn.dataset.code = code;
     setEmoteTooltip(btn, code, emote.source);
 
-    const url = safeUrl(emote.url);
-    if (!url) return null;
+    const animUrl = safeUrl(emote.url);
+    const staticUrl = emote.staticUrl ? safeUrl(emote.staticUrl) : null;
+    const defaultUrl = staticUrl ?? animUrl;
+    if (!defaultUrl) return null;
     const img = document.createElement('img');
     img.alt = code;
     img.draggable = false;
     img.decoding = 'async';
     img.setAttribute('fetchpriority', 'low');
-    img.dataset.kteSrc = url;
+    img.dataset.kteSrc = defaultUrl;
+    // Static-by-default + animate-on-hover: only set kteAnimSrc when the static
+    // and animated URLs actually differ (i.e. the provider serves a separate
+    // frozen frame). Without that, the emote either is naturally static or has
+    // no static variant available, so we just show whatever the default is.
+    if (staticUrl && animUrl && staticUrl !== animUrl) {
+      img.dataset.kteAnimSrc = animUrl;
+    }
     img.addEventListener('error', () => {
       if (img._kteRetry) return;
       img._kteRetry = true;
@@ -1185,6 +1266,18 @@
     btn.appendChild(img);
 
     return btn;
+  }
+
+  function pickerHoverAnimate(btn, hover) {
+    const img = btn.querySelector('img');
+    if (!img?.dataset.kteAnimSrc || img.dataset.kteLoaded !== '1') return;
+    if (hover) {
+      const animUrl = safeUrl(img.dataset.kteAnimSrc);
+      if (animUrl) img.src = animUrl;
+    } else {
+      const baseUrl = safeUrl(img.dataset.kteSrc ?? '');
+      if (baseUrl) img.src = baseUrl;
+    }
   }
 
   function pickerLoadImage(img) {
@@ -1200,6 +1293,7 @@
     content._kteImageLoading = true;
 
     function step() {
+      content._kteImagePumpTimer = null;
       if (!content.isConnected || content.dataset.kteStale === '1') {
         content._kteImageQueue = [];
         content._kteImageLoading = false;
@@ -1213,8 +1307,17 @@
       const batch = content._kteImageQueue.splice(0, PICKER_IMAGE_LOAD_CHUNK);
       batch.forEach(pickerLoadImage);
 
-      if (content._kteImageQueue.length) setTimeout(step, PICKER_IMAGE_LOAD_DELAY);
-      else content._kteImageLoading = false;
+      if (content._kteImageQueue.length) {
+        content._kteImagePumpTimer = setTimeout(step, PICKER_IMAGE_LOAD_DELAY);
+      } else {
+        content._kteImageLoading = false;
+        // Initial IO callback can queue more than the hard cap. The scroll-based
+        // unload pass only fires on scroll, so run cap enforcement once after
+        // the pump drains to bound memory even when the user never scrolls.
+        if (content._kteImageScrollTarget) {
+          pickerEvictFarOrCapped(content, content._kteImageScrollTarget);
+        }
+      }
     }
 
     requestAnimationFrame(step);
@@ -1241,44 +1344,42 @@
       : (fallback ?? pickerFindImageViewport(content));
   }
 
-  function pickerQueueVisibleImages(content, viewport = pickerFindImageViewport(content), unloadFarImages = false) {
+  function pickerUnloadImg(img) {
+    img.removeAttribute('src');
+    delete img.dataset.kteLoaded;
+    delete img.dataset.kteQueued;
+    delete img._kteRetry;
+  }
+
+  function pickerEvictFarOrCapped(content, viewport) {
     if (!content || content.hidden) return;
     const viewportRect = viewport?.getBoundingClientRect?.() ?? { top: 0, bottom: window.innerHeight };
-    const top = viewportRect.top - PICKER_IMAGE_VIEWPORT_BUFFER;
-    const bottom = viewportRect.bottom + PICKER_IMAGE_VIEWPORT_BUFFER;
     const unloadTop = viewportRect.top - PICKER_IMAGE_UNLOAD_BUFFER;
     const unloadBottom = viewportRect.bottom + PICKER_IMAGE_UNLOAD_BUFFER;
-
-    if (content._kteImageQueue?.length) {
-      content._kteImageQueue = content._kteImageQueue.filter(img => {
-        const rect = (img.parentElement ?? img).getBoundingClientRect();
-        const keep = img.isConnected && rect.bottom >= top && rect.top <= bottom;
-        if (!keep) delete img.dataset.kteQueued;
-        return keep;
-      });
-    }
-
-    if (unloadFarImages) {
-      content.querySelectorAll('img[data-kte-loaded="1"]').forEach(img => {
-        const rect = (img.parentElement ?? img).getBoundingClientRect();
-        if (rect.bottom >= unloadTop && rect.top <= unloadBottom) return;
-        img.removeAttribute('src');
-        delete img.dataset.kteLoaded;
-        delete img.dataset.kteQueued;
-        delete img._kteRetry;
-      });
-    }
-
-    if (!content._kteImageQueue) content._kteImageQueue = [];
-
-    for (const img of content.querySelectorAll('img[data-kte-src]:not([data-kte-loaded="1"]):not([data-kte-queued="1"])')) {
+    const center = (viewportRect.top + viewportRect.bottom) / 2;
+    const survivors = [];
+    content.querySelectorAll('img[data-kte-loaded="1"]').forEach(img => {
       const rect = (img.parentElement ?? img).getBoundingClientRect();
-      if (rect.top > bottom) break;
-      if (rect.bottom < top) continue;
-      img.dataset.kteQueued = '1';
-      content._kteImageQueue.push(img);
+      if (rect.bottom < unloadTop || rect.top > unloadBottom) {
+        pickerUnloadImg(img);
+        return;
+      }
+      survivors.push({ img, dist: Math.abs((rect.top + rect.bottom) / 2 - center) });
+    });
+    if (survivors.length > PICKER_MAX_LOADED) {
+      survivors.sort((a, b) => b.dist - a.dist);
+      for (let i = 0; i < survivors.length - PICKER_MAX_LOADED; i++) {
+        pickerUnloadImg(survivors[i].img);
+      }
     }
-    pickerPumpImageQueue(content);
+  }
+
+  function pickerObserveButton(content, btn) {
+    if (!content?._kteLoadObserver) return;
+    const img = btn.querySelector('img');
+    if (!img || img._kteObserved) return;
+    img._kteObserved = true;
+    content._kteLoadObserver.observe(img);
   }
 
   function pickerDetachImageLoader(content) {
@@ -1287,19 +1388,21 @@
       content._kteImageScrollTarget.removeEventListener('scroll', content._kteImageScrollHandler);
       window.removeEventListener('resize', content._kteImageScrollHandler);
     }
-    if (content._kteImageFrame) cancelAnimationFrame(content._kteImageFrame);
-    if (content._kteImageTimer) clearTimeout(content._kteImageTimer);
+    content._kteLoadObserver?.disconnect();
+    content._kteLoadObserver = null;
     if (content._kteImageUnloadTimer) clearTimeout(content._kteImageUnloadTimer);
+    if (content._kteImagePumpTimer) clearTimeout(content._kteImagePumpTimer);
     if (content._kteImageScrollTarget && content._kteScrollContainValue !== undefined) {
       content._kteImageScrollTarget.style.overscrollBehavior = content._kteScrollContainValue;
     }
     content._kteImageScrollTarget = null;
     content._kteImageScrollHandler = null;
-    content._kteImageFrame = null;
-    content._kteImageTimer = null;
     content._kteImageUnloadTimer = null;
+    content._kteImagePumpTimer = null;
     content._kteImageViewportFallback = null;
     content._kteScrollContainValue = undefined;
+    content._kteImageLoading = false;
+    if (activePickerImageLoader === content) activePickerImageLoader = null;
   }
 
   function pickerAttachImageLoader(content, viewport = pickerFindImageViewport(content)) {
@@ -1309,7 +1412,15 @@
     if (!viewport) return;
 
     if (content._kteImageScrollTarget === viewport && content._kteImageScrollHandler) {
-      content._kteImageScrollHandler();
+      // Same viewport — IntersectionObserver is already wired up. Just observe
+      // any imgs added since attach (e.g. Load more chunks).
+      if (content._kteLoadObserver) {
+        content.querySelectorAll('.kte-picker-btn img[data-kte-src]').forEach(img => {
+          if (img._kteObserved) return;
+          img._kteObserved = true;
+          content._kteLoadObserver.observe(img);
+        });
+      }
       return;
     }
 
@@ -1318,44 +1429,71 @@
     content._kteScrollContainValue = viewport.style.overscrollBehavior;
     viewport.style.overscrollBehavior = 'contain';
 
+    // IntersectionObserver tracks visible buttons natively — no per-scroll DOM
+    // walk. The browser only fires our callback for buttons whose visibility
+    // actually changed, so scrolling a fully-expanded "Load all" grid stays
+    // O(1) in our code regardless of total button count.
+    if (!content._kteImageQueue) content._kteImageQueue = [];
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        const img = entry.target;
+        if (!img.dataset.kteSrc) continue;
+        if (entry.isIntersecting) {
+          if (img.dataset.kteLoaded === '1' || img.dataset.kteQueued === '1') continue;
+          img.dataset.kteQueued = '1';
+          content._kteImageQueue.push(img);
+        } else if (img.dataset.kteQueued === '1') {
+          delete img.dataset.kteQueued;
+          const idx = content._kteImageQueue.indexOf(img);
+          if (idx >= 0) content._kteImageQueue.splice(idx, 1);
+        }
+      }
+      pickerPumpImageQueue(content);
+    }, { root: viewport, rootMargin: `${PICKER_IMAGE_VIEWPORT_BUFFER}px` });
+    content._kteLoadObserver = observer;
+    content.querySelectorAll('.kte-picker-btn img[data-kte-src]').forEach(img => {
+      img._kteObserved = true;
+      observer.observe(img);
+    });
+
+    // Unload throttle: periodically evict far-from-viewport images and enforce
+    // the hard cap. Runs at most once per PICKER_IMAGE_UNLOAD_DELAY during
+    // scroll. The actual visibility-tracking is the IO above; this just bounds
+    // memory.
     const schedule = () => {
-      if (content._kteImageUnloadTimer) clearTimeout(content._kteImageUnloadTimer);
+      if (content._kteImageUnloadTimer) return;
       content._kteImageUnloadTimer = setTimeout(() => {
         content._kteImageUnloadTimer = null;
-        pickerQueueVisibleImages(content, viewport, true);
+        pickerEvictFarOrCapped(content, viewport);
       }, PICKER_IMAGE_UNLOAD_DELAY);
-
-      if (content._kteImageFrame || content._kteImageTimer) return;
-
-      const elapsed = Date.now() - (content._kteLastImageScan ?? 0);
-      const run = () => {
-        content._kteImageTimer = null;
-        content._kteImageFrame = requestAnimationFrame(() => {
-          content._kteImageFrame = null;
-          content._kteLastImageScan = Date.now();
-          pickerQueueVisibleImages(content, viewport);
-        });
-      };
-
-      if (elapsed >= PICKER_IMAGE_SCAN_DELAY) run();
-      else content._kteImageTimer = setTimeout(run, PICKER_IMAGE_SCAN_DELAY - elapsed);
     };
 
     content._kteImageScrollTarget = viewport;
     content._kteImageScrollHandler = schedule;
     viewport.addEventListener('scroll', schedule, { passive: true });
     window.addEventListener('resize', schedule, { passive: true });
-    schedule();
+    if (activePickerImageLoader && activePickerImageLoader !== content) {
+      pickerDetachImageLoader(activePickerImageLoader);
+    }
+    activePickerImageLoader = content;
   }
 
   function pickerAppendButtons(grid, emotes, start, end) {
     const frag = document.createDocumentFragment();
+    const newButtons = [];
     for (let i = start; i < end; i++) {
       const { code, emote } = emotes[i];
       const btn = pickerBuildButton(code, emote);
-      if (btn) frag.appendChild(btn);
+      if (btn) {
+        frag.appendChild(btn);
+        newButtons.push(btn);
+      }
     }
     grid.appendChild(frag);
+    const content = grid.closest('#kte-picker-content');
+    if (content?._kteLoadObserver) {
+      for (const btn of newButtons) pickerObserveButton(content, btn);
+    }
   }
 
   function pickerAppendButtonsChunked(grid, emotes, start, end, onChunk, onDone) {
@@ -1506,11 +1644,17 @@
       grid.addEventListener('mousedown', e => { if (e.target.closest('.kte-picker-btn')) e.preventDefault(); });
       grid.addEventListener('mouseover', e => {
         const b = e.target.closest('.kte-picker-btn');
-        if (b && grid.contains(b)) showTooltip(b);
+        if (b && grid.contains(b)) {
+          showTooltip(b);
+          pickerHoverAnimate(b, true);
+        }
       });
       grid.addEventListener('mouseout', e => {
         const b = e.target.closest('.kte-picker-btn');
-        if (b && !b.contains(e.relatedTarget)) hideTooltip();
+        if (b && !b.contains(e.relatedTarget)) {
+          hideTooltip();
+          pickerHoverAnimate(b, false);
+        }
       });
       grid.addEventListener('click', e => {
         const b = e.target.closest('.kte-picker-btn');
@@ -1829,12 +1973,10 @@
 
   function queuePickerInject(panel, delay = PICKER_INJECT_DELAY) {
     if (pickerInjectTimer) clearTimeout(pickerInjectTimer);
-    pickerInjectQueued = true;
     const seq = initSeq;
     pickerInjectTimer = setTimeout(() => {
       pickerInjectTimer = null;
       requestAnimationFrame(() => {
-        pickerInjectQueued = false;
         if (seq !== initSeq) return;
         const target = panel?.isConnected ? panel : document.getElementById('chat-emotes-picker-panel');
         if (target) pickerInject(target);
@@ -1843,7 +1985,6 @@
   }
 
   function resetPicker() {
-    pickerInjectQueued = false;
     if (pickerInjectTimer) {
       clearTimeout(pickerInjectTimer);
       pickerInjectTimer = null;
@@ -1902,6 +2043,10 @@
       }
 
       if (pickerPanelToInject) queuePickerInject(pickerPanelToInject);
+      // Kick may replace the chat input element during stream switches — piggyback
+      // on this observer (already watching body subtree) to re-attach autocomplete
+      // when the tracked input disconnects.
+      if (!attachedAcInput?.isConnected) attemptAcAttach();
     });
     chatObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-index'] });
   }
@@ -2033,13 +2178,16 @@
       clearTimeout(visibleRefreshTimer);
       visibleRefreshTimer = null;
     }
-    visibleRefreshQueued = false;
     messageProcessQueue = [];
     messageProcessQueued = false;
     emoteMap.clear();
     emoteVersion++;
     acHide();
     hideTooltip();
+    // Full stale-mark (not just detach) so image src is cleared even when Kick
+    // has already removed the picker panel — resetPicker bails on a missing
+    // panel and would otherwise leave decoded image data alive.
+    if (activePickerImageLoader) pickerMarkContentStale(activePickerImageLoader);
     resetPicker();
     waitForDOMThenInit();
   }
@@ -2067,7 +2215,22 @@
     handleNavigation();
   }
 
+  // Poll location.pathname as the source of truth — Kick's router may hold a
+  // captured reference to history.pushState/replaceState from before this script
+  // loaded, which would bypass any wrapper we install. Polling catches every
+  // navigation regardless of mechanism.
   setInterval(checkRouteChange, 500);
+
+  // Fast path for navigations that do route through the live history methods,
+  // so we don't have to wait up to 500ms for the interval to notice.
+  for (const method of ['pushState', 'replaceState']) {
+    const original = history[method];
+    history[method] = function (...args) {
+      const result = original.apply(this, args);
+      checkRouteChange();
+      return result;
+    };
+  }
 
   window.addEventListener('popstate', () => {
     checkRouteChange();

@@ -4,6 +4,70 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-05-15
+
+### Changed
+- Animate picker emotes only while hovered. Picker thumbnails now show the frozen first frame by default and start animating when the cursor is over them, then freeze again on mouseout. Drops the background-animation cost from "every loaded animated emote, forever" to "at most one at a time", which keeps Safari's image-decode cache from growing without bound during heavy picker browsing.
+- Add optional `staticUrl` field to the emote cache schema. Populated automatically for animated 7TV emotes (using 7TV's `_static` variant URLs); BTTV animated emotes still animate by default because BTTV doesn't serve a static frame URL. Chat emote rendering is unchanged.
+- Bump cache key prefix to `kte_v2_` so the schema change takes effect immediately on next page load instead of waiting up to 12h for the existing cache to expire. Old `kte_` entries become unused.
+
+## [2.6.54] - 2026-05-15
+
+### Changed
+- Replace the picker's per-scroll DOM-scan visibility check with an `IntersectionObserver`. With "Load all" expanded to thousands of buttons, the previous code re-walked the entire unloaded set on every scroll frame (`querySelectorAll` + `getBoundingClientRect` per element); the new code is O(visibility-changes) instead of O(total-buttons), so scrolling stays smooth no matter how many emotes are loaded. Animated emotes continue to render normally.
+
+## [2.6.53] - 2026-05-15
+
+### Fixed
+- Add `content-visibility: auto` + `contain: layout style paint` to every picker emote button. With "Load all" expanded into thousands of buttons, the browser was paying layout/paint cost for every one on each scroll frame; the containment hints let it skip work for off-screen buttons entirely, so scrolling the fully-expanded picker no longer lags the rest of the page.
+
+## [2.6.52] - 2026-05-15
+
+### Fixed
+- Tighten picker image budget for fullscreen use: hard cap 100 → 40, unload buffer 300 → 200, unload delay 400 → 250. Scrolling up and down through a fully-expanded picker while the fullscreen video player was running could pile up enough animated emotes to push Safari's GPU over the edge; the previous cap left too little headroom alongside the fullscreen video texture.
+
+## [2.6.51] - 2026-05-15
+
+### Fixed
+- Shrink the picker image "stay loaded" zone (`PICKER_IMAGE_UNLOAD_BUFFER` 700 → 300) and run the unload pass more often (`PICKER_IMAGE_UNLOAD_DELAY` 700 → 400) so far fewer animated GIFs sit in GPU memory at once.
+- Hard cap simultaneously loaded picker images at 100. Heavy scroll-and-"Load more" sessions could otherwise pile up hundreds of decoded GIFs, costing Safari's video player its WebGL context after a stream switch and leaving the whole page laggy until reload.
+
+## [2.6.50] - 2026-05-15
+
+### Fixed
+- Throttle (not debounce) the picker's far-image unload pass so heavy continuous scrolling can't keep deferring it. Previously a long uninterrupted scroll — especially after "Load more" — kept every visited emote image loaded simultaneously, leaving a large pile of decoded animated GIFs behind that made the whole Kick page laggy after a stream switch.
+- On stream switch, fully stale-mark the active picker content (clearing image `src`) instead of only detaching its scroll listeners, so decoded image data is released even when Kick has already removed the picker panel.
+
+## [2.6.49] - 2026-05-15
+
+### Fixed
+- Restore the 500ms pathname polling that detects SPA stream switches. The pushState/replaceState wrappers added in 2.6.45 missed navigations when Kick's router called a captured reference to the original method, so `emoteMap` never cleared and new channels kept showing the previous channel's emotes. The wrappers stay in place as a fast path; polling is now the safety net.
+
+## [2.6.48] - 2026-05-15
+
+### Fixed
+- Restore page responsiveness on stream switches by removing the always-on body MutationObserver added in 2.6.47 (it duplicated the chat observer's body-wide scope). Autocomplete re-attachment now piggybacks on the existing chat observer, so Kick swapping the chat input element on stream switch is still handled without a second observer.
+
+## [2.6.47] - 2026-05-15
+
+### Fixed
+- Re-attach autocomplete listeners when Kick replaces the chat input element during initial routing or stream switches. The input observer now stays alive for the whole session and re-attaches as soon as a new input appears, instead of disconnecting after the first match.
+
+## [2.6.46] - 2026-05-15
+
+### Fixed
+- Force-detach the picker's viewport scroll and window resize listeners on stream switch even when Kick has already removed the picker panel, so the page no longer stays laggy after browsing the picker and then navigating away.
+- Track the `pickerPumpImageQueue` setTimeout so detaching the picker image loader cancels the chain synchronously instead of letting it spin down on its own.
+
+## [2.6.45] - 2026-05-15
+
+### Changed
+- Trigger SPA route handling from `history.pushState`/`replaceState` hooks instead of a 500ms polling interval, so channel switches are detected immediately and the script stays idle in between.
+- Cache a pre-sorted lowercase autocomplete index per emote version, avoiding a full `emoteMap` scan and per-keystroke `toLowerCase` calls.
+
+### Removed
+- Drop unused `visibleRefreshQueued` and `pickerInjectQueued` state flags.
+
 ## [2.6.44] - 2026-05-15
 
 ### Fixed
