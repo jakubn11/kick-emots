@@ -2,6 +2,12 @@
 
 Adds **BetterTTV**, **7TV**, and **FrankerFaceZ** emotes to Kick.com chat.
 
+## Quick install
+
+Open **[Kick Third-Party Emotes on Greasy Fork](https://greasyfork.org/cs/scripts/578174-kick-third-party-emotes)** and use the install button if your userscript manager supports web installs.
+
+If your manager does not catch Greasy Fork installs automatically, use the manual steps below.
+
 ## Safari (recommended)
 
 Safari requires a userscript host app. **[Userscripts](https://apps.apple.com/app/userscripts/id1463298887)** (free, by Justin Wasack) is the recommended one.
